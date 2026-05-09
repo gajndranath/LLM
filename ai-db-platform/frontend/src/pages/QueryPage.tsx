@@ -1,0 +1,476 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Editor from '@monaco-editor/react';
+import { api } from '../api/axiosInstance';
+import { useApp } from '../context/AppContext';
+import {
+  Terminal,
+  Play,
+  Zap,
+  Loader2,
+
+  Database,
+
+  CheckCircle2,
+  Table as TableIcon,
+  ShieldAlert,
+  ArrowRight,
+  Sparkles,
+
+  Layout,
+  Layers,
+  ChevronRight,
+  ChevronDown,
+  Info
+} from 'lucide-react';
+import { toast } from 'sonner';
+import ChartRenderer from '../components/ChartRenderer';
+
+const QueryPage = () => {
+  const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useApp();
+  const [naturalQuery, setNaturalQuery] = useState('');
+  const [generatedSql, setGeneratedSql] = useState('');
+  const [results, setResults] = useState<any>(null);
+
+  const [activeTab, setActiveTab] = useState<'editor' | 'history'>('editor');
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [chartRec, setChartRec] = useState<any>(null);
+  const [expandedTables, setExpandedTables] = useState<string[]>([]);
+  const [insights, setInsights] = useState<any>(null);
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+
+  const queryClient = useQueryClient();
+
+  // Fetch connections for the dropdown
+  const { data: connections, isLoading } = useQuery({
+    queryKey: ['connections'],
+    queryFn: async () => {
+      const { data } = await api.get('/connections');
+      return data.data || []; // Ensure it's always an array
+    }
+  });
+
+  // Fetch schema for the selected connection
+  const { data: schema, isLoading: schemaLoading } = useQuery({
+    queryKey: ['schema', selectedConn],
+    queryFn: async () => {
+      if (!selectedConn) return null;
+      const { data } = await api.get(`/connections/${selectedConn}/schema`);
+      return data.data;
+    },
+    enabled: !!selectedConn
+  });
+
+  // Fetch History
+  const { data: history } = useQuery({
+    queryKey: ['history', selectedConn],
+    queryFn: async () => {
+      const { data } = await api.get(`/query/history${selectedConn ? `?connectionId=${selectedConn}` : ''}`);
+      return data.data;
+    }
+  });
+
+  // 1. Generate SQL Mutation
+  const generateMutation = useMutation({
+    mutationFn: (data: any) => api.post('/query/generate', data),
+    onSuccess: (res) => {
+      setGeneratedSql(res.data.data.sql);
+      setChartRec(res.data.data.chart_recommendation);
+      toast.success('SQL Generated successfully');
+      if (res.data.data.warnings?.length > 0) {
+        res.data.data.warnings.forEach((w: string) => toast.warning(w));
+      }
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to generate SQL')
+  });
+
+  // 2. Execute SQL Mutation
+  const executeMutation = useMutation({
+    mutationFn: (data: any) => api.post('/query/execute', data),
+    onSuccess: async (res) => {
+      const data = res.data.data;
+      setResults(data);
+      toast.success(`Query executed: ${data.rowCount} rows returned`);
+      queryClient.invalidateQueries({ queryKey: ['history'] });
+
+      // Automatically trigger insights if we have data
+      if (data.rows && data.rows.length > 0) {
+        setIsGeneratingInsights(true);
+        try {
+          const insRes = await api.post('/query/insights', {
+            query: naturalQuery,
+            results: data.rows.slice(0, 50)
+          });
+          setInsights(insRes.data.data);
+          setViewMode('chart');
+        } catch (error) {
+          console.error("Insights generation failed", error);
+        } finally {
+          setIsGeneratingInsights(false);
+        }
+      }
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Query failed')
+  });
+
+  // 3. Optimize SQL Mutation
+  const optimizeMutation = useMutation({
+    mutationFn: (data: any) => api.post('/query/optimize', data),
+    onSuccess: (res) => {
+      setGeneratedSql(res.data.data.optimizedSql);
+      toast.success('SQL Optimized by AI');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Optimization failed')
+  });
+
+  const handleGenerate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedConn) return toast.error('Select a data source first');
+    if (!naturalQuery.trim()) return toast.error('Enter a query description');
+    generateMutation.mutate({ naturalQuery, connectionId: selectedConn });
+  };
+
+  const handleExecute = () => {
+    if (!selectedConn) return toast.error('Select a data source');
+    if (!generatedSql.trim()) return toast.error('No SQL to execute');
+    executeMutation.mutate({ sql: generatedSql, connectionId: selectedConn });
+  };
+
+  const handleOptimize = () => {
+    if (!selectedConn) return toast.error('Select a data source');
+    if (!generatedSql.trim()) return toast.error('No SQL to optimize');
+    optimizeMutation.mutate({ sql: generatedSql, connectionId: selectedConn });
+  };
+
+  return (
+    <div className="h-[calc(100vh-8rem)] flex flex-col space-y-6">
+      <header className="flex justify-between items-center">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">AI SQL Copilot</h2>
+          <p className="text-slate-400 mt-2 font-medium">Conversational interface for complex database operations</p>
+        </div>
+
+        <div className="flex items-center space-x-4">
+          <div className="glass px-6 py-3 rounded-2xl flex items-center space-x-3 min-w-[240px]">
+            <Database size={18} className="text-blue-400" />
+            <select
+              className="bg-transparent border-none focus:ring-0 text-sm font-bold w-full text-white cursor-pointer"
+              value={selectedConn}
+              onChange={(e) => setSelectedConn(e.target.value)}
+            >
+              <option value="" className="bg-slate-900">
+                {isLoading ? 'Loading sources...' : 'Select Data Source'}
+              </option>
+              {Array.isArray(connections) && connections.map((conn: any) => (
+                <option key={conn.id} value={conn.id} className="bg-slate-900">
+                  {conn.name} ({conn.database_name})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 min-h-0">
+        {/* Left: Schema Explorer (3 cols) */}
+        <aside className="lg:col-span-3 glass rounded-[2.5rem] overflow-hidden flex flex-col border border-white/5">
+          <div className="px-6 py-5 border-b border-white/5 flex items-center space-x-3 bg-white/2">
+            <Layers className="text-blue-400" size={18} />
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Schema Explorer</span>
+          </div>
+          <div className="flex-1 overflow-auto p-4 space-y-4">
+            {!selectedConn ? (
+              <div className="h-full flex flex-col items-center justify-center text-center opacity-40 p-6">
+                <Info size={24} className="mb-3" />
+                <p className="text-xs font-medium">Select a connection to explore schema</p>
+              </div>
+            ) : schemaLoading ? (
+              <div className="flex items-center justify-center p-10">
+                <Loader2 size={24} className="animate-spin text-blue-500" />
+              </div>
+            ) : (
+              schema?.tables.map((table: any, idx: number) => {
+                const isExpanded = expandedTables.includes(table.table_name);
+                return (
+                  <div key={`${table.table_name}-${idx}`} className="space-y-1">
+                    <button
+                      onClick={() => setExpandedTables(prev =>
+                        isExpanded ? prev.filter(t => t !== table.table_name) : [...prev, table.table_name]
+                      )}
+                      className="flex items-center space-x-2 text-slate-300 hover:text-white w-full text-left group transition-all"
+                    >
+                      {isExpanded ? <ChevronDown size={14} className="text-blue-400" /> : <ChevronRight size={14} className="text-slate-600" />}
+                      <TableIcon size={14} className="text-blue-400/60" />
+                      <span className="text-sm font-bold truncate">{table.table_name}</span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="ml-6 space-y-3 border-l border-white/5 pl-3 animate-in slide-in-from-top-2 duration-200">
+                        {/* Columns */}
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest block mb-1">Columns</span>
+                          {table.columns.map((col: any, cIdx: number) => (
+                            <div key={`${table.table_name}-${col.column_name}-${cIdx}`} className="flex items-center justify-between text-[11px] text-slate-500 py-0.5 group/col">
+                              <span className="truncate group-hover/col:text-slate-300 transition-colors">{col.column_name}</span>
+                              <span className="text-[9px] uppercase opacity-50 bg-white/5 px-1 rounded">{col.data_type}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Indexes */}
+                        {table.indexes && table.indexes.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-bold text-blue-500/50 uppercase tracking-widest block mb-1">Indexes</span>
+                            {table.indexes.map((idx: any, iIdx: number) => (
+                              <div key={`${table.table_name}-${idx.index_name}-${iIdx}`} className="flex items-center justify-between text-[10px] text-slate-500 py-0.5 group/idx">
+                                <div className="flex items-center space-x-2 truncate">
+                                  <div className="w-1 h-1 rounded-full bg-blue-500/50" />
+                                  <span className="truncate group-hover/idx:text-blue-300 transition-colors">{idx.index_name}</span>
+                                </div>
+                                {idx.is_unique && <span className="text-[8px] bg-emerald-500/10 text-emerald-500 px-1 rounded border border-emerald-500/20">UNIQUE</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
+
+        {/* Middle: AI Input & Editor (5 cols) */}
+        <div className="lg:col-span-5 flex flex-col space-y-6 min-h-0">
+          <div className="glass p-6 rounded-[2rem] flex flex-col shadow-xl border border-white/5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-3">
+                <Zap className="text-emerald-400" size={18} />
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Query Intent</span>
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => setActiveTab('editor')}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${activeTab === 'editor' ? 'bg-blue-500 text-white' : 'text-slate-500 hover:bg-white/5'}`}
+                >
+                  EDITOR
+                </button>
+                <button
+                  onClick={() => setActiveTab('history')}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${activeTab === 'history' ? 'bg-blue-500 text-white' : 'text-slate-500 hover:bg-white/5'}`}
+                >
+                  HISTORY
+                </button>
+              </div>
+            </div>
+
+            {activeTab === 'editor' ? (
+              <form onSubmit={handleGenerate} className="relative">
+                <textarea
+                  className="w-full bg-black/20 border border-white/5 rounded-2xl p-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 min-h-[100px] resize-none text-sm font-medium"
+                  placeholder="Ask me anything about your data..."
+                  value={naturalQuery}
+                  onChange={(e) => setNaturalQuery(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={generateMutation.isPending}
+                  className="absolute bottom-3 right-3 bg-blue-600 hover:bg-blue-500 p-3 rounded-xl text-white transition-all shadow-lg shadow-blue-600/20 active:scale-90"
+                >
+                  {generateMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-2 max-h-[100px] overflow-auto pr-2">
+                {history?.length === 0 ? (
+                  <p className="text-xs text-slate-600 text-center py-4 italic">No history yet</p>
+                ) : (
+                  history?.slice(0, 5).map((h: any) => (
+                    <div
+                      key={h.id}
+                      onClick={() => { setGeneratedSql(h.generated_sql); setActiveTab('editor'); }}
+                      className="p-2 rounded-lg bg-white/5 border border-white/5 hover:border-blue-500/50 cursor-pointer transition-all flex items-center justify-between group"
+                    >
+                      <span className="text-[11px] text-slate-400 truncate max-w-[80%] italic">"{h.natural_query || h.generated_sql.substring(0, 30)}..."</span>
+                      <ChevronRight size={12} className="text-slate-600 group-hover:text-blue-400" />
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 glass rounded-[2.5rem] overflow-hidden flex flex-col relative border border-white/5">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+              <div className="flex items-center space-x-3">
+                <Terminal className="text-blue-400" size={18} />
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">SQL Lab</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleOptimize}
+                  disabled={optimizeMutation.isPending || !generatedSql}
+                  className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all border border-blue-500/20 active:scale-95"
+                >
+                  {optimizeMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  <span>Optimize</span>
+                </button>
+                <button
+                  onClick={handleExecute}
+                  disabled={executeMutation.isPending || !generatedSql}
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shadow-lg shadow-emerald-600/20 active:scale-95"
+                >
+                  {executeMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
+                  <span>Run</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1">
+              <Editor
+                height="100%"
+                defaultLanguage="sql"
+                theme="vs-dark"
+                value={generatedSql}
+                onChange={(val) => setGeneratedSql(val || '')}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  padding: { top: 15 },
+                  automaticLayout: true
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Results (4 cols) */}
+        <div className="lg:col-span-4 glass rounded-[2.5rem] overflow-hidden flex flex-col border border-white/5">
+          <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/2">
+            <div className="flex items-center space-x-3">
+              <TableIcon className="text-purple-400" size={18} />
+              <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Insights</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setViewMode('table')}
+                className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${viewMode === 'table' ? 'bg-purple-500 text-white' : 'text-slate-500 hover:bg-white/5'}`}
+              >
+                TABLE
+              </button>
+              <button
+                onClick={() => setViewMode('chart')}
+                disabled={(!chartRec || chartRec.type === 'none') && !insights}
+                className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${viewMode === 'chart' ? 'bg-purple-500 text-white' : 'text-slate-500 hover:bg-white/5 disabled:opacity-20'}`}
+              >
+                VISUALIZE
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            {!results ? (
+              <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-30">
+                <Layout size={32} className="mb-4" />
+                <p className="text-xs font-bold">No Data Loaded</p>
+              </div>
+            ) : viewMode === 'table' ? (
+              <table className="w-full text-left text-xs">
+                <thead className="bg-white/5 sticky top-0">
+                  <tr>
+                    {results.fields.map((f: any) => (
+                      <th key={f.name} className="px-4 py-3 border-b border-white/5 font-bold text-slate-400 uppercase tracking-wider">{f.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {results.rows.map((row: any, i: number) => (
+                    <tr key={i} className="hover:bg-white/2 transition-colors">
+                      {results.fields.map((f: any) => (
+                        <td key={f.name} className="px-4 py-3 text-slate-300 truncate max-w-[150px]">{row[f.name]?.toString() || 'null'}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="h-full p-6 space-y-6">
+                {chartRec && chartRec.type !== 'none' && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">{chartRec?.label || 'AI Recommended Chart'}</h4>
+                      <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 uppercase font-bold">{chartRec?.type}</span>
+                    </div>
+
+                    <div className="h-[200px]">
+                      <ChartRenderer
+                        type={chartRec.type}
+                        data={results.rows}
+                        xAxis={chartRec.x_axis}
+                        yAxis={chartRec.y_axis}
+                        label={chartRec.label}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="space-y-4 mt-8">
+                  <div className="flex items-center space-x-2">
+                    <Sparkles size={16} className="text-purple-400" />
+                    <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400">AI Data Story</h5>
+                  </div>
+
+                  {isGeneratingInsights ? (
+                    <div className="flex items-center space-x-3 text-slate-500 py-4 italic animate-pulse">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="text-xs">AI is analyzing results...</span>
+                    </div>
+                  ) : insights ? (
+                    <div className="space-y-4">
+                      <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                        <p className="text-sm text-slate-300 leading-relaxed font-medium">
+                          {insights.summary}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="space-y-2">
+                          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-tighter">Key Findings</span>
+                          <ul className="space-y-1">
+                            {insights.key_findings.map((f: string, i: number) => (
+                              <li key={i} className="flex items-start space-x-2 text-[11px] text-slate-400">
+                                <CheckCircle2 size={12} className="mt-0.5 text-emerald-500/50 flex-shrink-0" />
+                                <span>{f}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        {insights.anomalies.length > 0 && insights.anomalies[0] !== 'None detected' && (
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-tighter">Anomalies</span>
+                            <ul className="space-y-1">
+                              {insights.anomalies.map((f: string, i: number) => (
+                                <li key={i} className="flex items-start space-x-2 text-[11px] text-slate-400">
+                                  <ShieldAlert size={12} className="mt-0.5 text-amber-500/50 flex-shrink-0" />
+                                  <span>{f}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600 italic">No insights generated for this query.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default QueryPage;
