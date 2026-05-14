@@ -50,7 +50,7 @@ router.get('/:id/test', asyncHandler(async (req: Request, res: Response) => {
 // GET /api/connections/:id/schema
 router.get('/:id/schema', asyncHandler(async (req: Request, res: Response) => {
   const pool = await getConnectionPool(req.params.id, req.user!.userId);
-  const schema = await extractSchema(pool);
+  const schema = await extractSchema(pool, true);
   
   return res.status(200).json(
     new ApiResponse(200, schema, "Schema extracted successfully")

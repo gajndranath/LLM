@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_TOKENS: int = 2048
+    LLM_MAX_TOKENS: int = 4096  # INCREASED from 2048 to prevent truncation
     
     # Security
     AI_SERVICE_SECRET: str = "internal_secret_change_this_xxxxxxxxxxxx"

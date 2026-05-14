@@ -5,8 +5,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import QueryPage from './pages/QueryPage';
 import ConnectionsPage from './pages/ConnectionsPage';
-import ArchitectPage from './pages/ArchitectPage';
-import DesignStudio from './pages/DesignStudio';
+import ArchitectStudio from './pages/ArchitectStudio';
 import MainLayout from './layouts/MainLayout';
 
 function App() {
@@ -23,8 +22,7 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/query" element={<QueryPage />} />
         <Route path="/connections" element={<ConnectionsPage />} />
-        <Route path="/architect" element={<ArchitectPage />} />
-        <Route path="/design-studio" element={<DesignStudio />} />
+        <Route path="/architect" element={<ArchitectStudio />} />
       </Route>
 
       {/* Catch all */}

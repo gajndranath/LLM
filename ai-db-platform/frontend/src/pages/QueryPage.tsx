@@ -8,15 +8,12 @@ import {
   Play,
   Zap,
   Loader2,
-
   Database,
-
   CheckCircle2,
   Table as TableIcon,
   ShieldAlert,
   ArrowRight,
   Sparkles,
-
   Layout,
   Layers,
   ChevronRight,
@@ -25,6 +22,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ChartRenderer from '../components/ChartRenderer';
+import MermaidChart from '../components/MermaidChart';
 
 const QueryPage = () => {
   const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useApp();
@@ -33,7 +31,8 @@ const QueryPage = () => {
   const [results, setResults] = useState<any>(null);
 
   const [activeTab, setActiveTab] = useState<'editor' | 'history'>('editor');
-  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'chart' | 'diagrams'>('table');
+  const [diagramTab, setDiagramTab] = useState<'erd' | 'dfd' | 'flow'>('erd');
   const [chartRec, setChartRec] = useState<any>(null);
   const [expandedTables, setExpandedTables] = useState<string[]>([]);
   const [insights, setInsights] = useState<any>(null);
@@ -99,7 +98,8 @@ const QueryPage = () => {
         try {
           const insRes = await api.post('/query/insights', {
             query: naturalQuery,
-            results: data.rows.slice(0, 50)
+            results: data.rows.slice(0, 50),
+            connectionId: selectedConn
           });
           setInsights(insRes.data.data);
           setViewMode('chart');
@@ -178,7 +178,7 @@ const QueryPage = () => {
             <Layers className="text-blue-400" size={18} />
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Schema Explorer</span>
           </div>
-          <div className="flex-1 overflow-auto p-4 space-y-4">
+          <div className="flex-1 overflow-auto p-4 space-y-4 custom-scrollbar">
             {!selectedConn ? (
               <div className="h-full flex flex-col items-center justify-center text-center opacity-40 p-6">
                 <Info size={24} className="mb-3" />
@@ -365,10 +365,87 @@ const QueryPage = () => {
               >
                 VISUALIZE
               </button>
+              <button
+                onClick={() => setViewMode('diagrams')}
+                disabled={!insights?.erd_mermaid && !insights?.dfd_mermaid && !insights?.flow_mermaid && !schema?.erd_mermaid}
+                className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${viewMode === 'diagrams' ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'text-slate-500 hover:bg-white/5 disabled:opacity-20'}`}
+              >
+                DIAGRAMS
+              </button>
             </div>
           </div>
           <div className="flex-1 overflow-auto">
-            {!results ? (
+            {viewMode === 'diagrams' ? (
+              <div className="h-full flex flex-col min-h-0 overflow-hidden">
+                <div className="flex items-center space-x-6 px-6 py-4 border-b border-white/5 bg-white/2">
+                  {(['erd', 'dfd', 'flow'] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setDiagramTab(t)}
+                      className={`text-[10px] font-bold uppercase tracking-widest transition-all pb-1 border-b-2 ${diagramTab === t ? 'text-blue-400 border-blue-400' : 'text-slate-500 border-transparent hover:text-slate-300'}`}
+                    >
+                      {t === 'erd' ? 'Schema ERD' : t === 'dfd' ? 'Logic Flow (DFD)' : 'Operational Flow'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex-1 overflow-auto p-8 custom-scrollbar bg-slate-950/20">
+                  {diagramTab === 'erd' && (
+                    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-white uppercase tracking-wider">Entity Relationship Diagram</h4>
+                          <p className="text-[10px] text-slate-500 uppercase font-medium">Complete schema architecture and table relations</p>
+                        </div>
+                        <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 font-bold">MERMAID ERD</span>
+                      </div>
+                      <div className="bg-slate-900/40 rounded-3xl p-8 border border-white/5 shadow-2xl">
+                        <MermaidChart chart={insights?.erd_mermaid || schema?.erd_mermaid || ''} />
+                      </div>
+                    </div>
+                  )}
+
+                  {diagramTab === 'dfd' && (
+                    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-white uppercase tracking-wider">Data Flow Diagram</h4>
+                          <p className="text-[10px] text-slate-500 uppercase font-medium">Logical movement of data and transformation steps</p>
+                        </div>
+                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">MERMAID DFD</span>
+                      </div>
+                      <div className="bg-slate-900/40 rounded-3xl p-8 border border-white/5 shadow-2xl">
+                        <MermaidChart chart={insights?.dfd_mermaid || schema?.dfd_mermaid || ''} />
+                      </div>
+                    </div>
+                  )}
+
+                  {diagramTab === 'flow' && (
+                    <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-white uppercase tracking-wider">Operational Business Flow</h4>
+                          <p className="text-[10px] text-slate-500 uppercase font-medium">Real-world sequence and interaction story</p>
+                        </div>
+                        <span className="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded border border-purple-500/20 font-bold">MERMAID SEQUENCE</span>
+                      </div>
+                      <div className="bg-slate-900/40 rounded-3xl p-8 border border-white/5 shadow-2xl">
+                        <MermaidChart chart={insights?.flow_mermaid || ''} />
+                      </div>
+                    </div>
+                  )}
+
+                  {((diagramTab === 'erd' && !insights?.erd_mermaid && !schema?.erd_mermaid) ||
+                    (diagramTab === 'dfd' && !insights?.dfd_mermaid && !schema?.dfd_mermaid) ||
+                    (diagramTab === 'flow' && !insights?.flow_mermaid)) && (
+                      <div className="h-full flex flex-col items-center justify-center opacity-30 text-center py-20">
+                        <Info size={40} className="mb-4" />
+                        <p className="text-xs font-bold uppercase tracking-[0.2em]">Visualizing System... Please wait</p>
+                      </div>
+                    )}
+                </div>
+              </div>
+            ) : !results ? (
               <div className="h-full flex flex-col items-center justify-center p-12 text-center opacity-30">
                 <Layout size={32} className="mb-4" />
                 <p className="text-xs font-bold">No Data Loaded</p>
@@ -392,7 +469,7 @@ const QueryPage = () => {
                   ))}
                 </tbody>
               </table>
-            ) : (
+            ) : viewMode === 'chart' ? (
               <div className="h-full p-6 space-y-6">
                 {chartRec && chartRec.type !== 'none' && (
                   <>
@@ -465,11 +542,14 @@ const QueryPage = () => {
                   )}
                 </div>
               </div>
+            ) : (
+              <p className="text-xs text-slate-600 italic text-center py-20">No visualization available for these results.</p>
             )}
           </div>
         </div>
       </div>
     </div>
+
   );
 };
 

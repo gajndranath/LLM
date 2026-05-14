@@ -11,7 +11,7 @@ const pool = new Pool({
 });
 
 const initDb = async () => {
-  console.log('🏁 JARVIS: Initializing Database Tables...');
+  console.log('🏁 ATLAS: Initializing Database Tables...');
   
   const queries = [
     `CREATE TABLE IF NOT EXISTS architect_audits (
@@ -47,7 +47,7 @@ const initDb = async () => {
       await pool.query(q);
       console.log('✅ Executed: ' + q.split('(')[0].trim());
     }
-    console.log('🚀 JARVIS: All tables are now LIVE!');
+    console.log('🚀 ATLAS: All tables are now LIVE!');
   } catch (err) {
     console.error('❌ Database Init Failed:', err);
   } finally {

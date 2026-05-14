@@ -4,17 +4,15 @@ import { api } from '../api/axiosInstance';
 import {
   Database,
   Activity,
-
   History,
   ArrowUpRight,
   Plus,
-  Cpu,
   ShieldCheck,
   Target,
-  ChevronRight,
-
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -40,13 +38,15 @@ const Dashboard = () => {
     }
   });
 
-  // NEW: Fetch Active Missions from Jarvis
+  // NEW: Fetch Active Missions from ATLAS
   const { data: missions, refetch: refetchMissions } = useQuery({
     queryKey: ['missions', selectedConnectionId],
     queryFn: async () => {
-      const { data } = await api.get(`/missions/active${selectedConnectionId ? `?connectionId=${selectedConnectionId}` : ''}`);
+      if (!selectedConnectionId) return [];
+      const { data } = await api.get(`/architect/missions/${selectedConnectionId}`);
       return data.data || [];
-    }
+    },
+    enabled: !!selectedConnectionId
   });
 
   const { data: audits } = useQuery({
@@ -58,25 +58,24 @@ const Dashboard = () => {
     enabled: !!selectedConnectionId
   });
 
-  // NEW: Jarvis Proactive Audit (Automated Workspace Analysis)
-  const architectMutation = useMutation({
-    mutationFn: (data: any) => api.post('/architect/review', data),
-    onSuccess: (res) => {
-      toast.success("Jarvis: Workspace Analysis Complete!");
+  // NEW: ATLAS Proactive Audit (Automated Workspace Analysis)
+  const { mutate: runAudit, isPending: isAuditing } = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/architect/audit', { connectionId: selectedConnectionId, scale: '1M rows' });
+      return data.data;
+    },
+    onSuccess: () => {
+      toast.success("ATLAS: Workspace Analysis Complete!");
       queryClient.invalidateQueries({ queryKey: ['architect-history'] });
       queryClient.invalidateQueries({ queryKey: ['missions'] });
     }
   });
 
   useEffect(() => {
-    // If we have a workspace selected, but no audits yet, Jarvis starts automatically
-    if (selectedConnectionId && audits && audits.length === 0 && !architectMutation.isPending && !architectMutation.isSuccess) {
-      toast.info("Jarvis: New Workspace detected. Initializing Master Audit...");
-      architectMutation.mutate({ 
-        connectionId: selectedConnectionId, 
-        scale: '1M rows',
-        requirements: "General high-performance audit for new workspace initialization."
-      });
+    // If we have a workspace selected, but no audits yet, ATLAS starts automatically
+    if (selectedConnectionId && audits && audits.length === 0 && !isAuditing) {
+      toast.info("ATLAS: New Workspace detected. Initializing Master Audit...");
+      runAudit();
     }
   }, [selectedConnectionId, audits]);
 
@@ -128,28 +127,24 @@ const Dashboard = () => {
         ))}
       </div>
 
-      {/* JARVIS MISSION CONTROL */}
-      <div className="grid grid-cols-1 gap-8">
-        <div className="glass rounded-[2.5rem] p-10 border-t-4 border-t-blue-500/50 shadow-2xl shadow-blue-500/5 relative overflow-hidden">
-          {/* Animated Background Effect */}
-          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
-
-          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-12 relative z-10">
-            {/* Jarvis Briefing */}
-            <div className="flex-1 space-y-6">
-              <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center text-blue-400 border border-blue-500/30 animate-pulse">
-                  <Cpu size={24} />
+      {/* ATLAS MISSION CONTROL */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="glass rounded-3xl p-8 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+              <Zap size={120} className="text-blue-400" />
+            </div>
+            <div className="relative z-10">
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <ShieldAlert className="text-blue-400" size={24} />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black tracking-tight text-white flex items-center space-x-2">
-                    <span>JARVIS MISSION CONTROL</span>
-                    <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold">ACTIVE AGENT</span>
-                  </h3>
-                  <p className="text-xs font-bold text-blue-400 uppercase tracking-widest opacity-70">Senior Principal AI Architect</p>
+                  <h2 className="text-xl font-bold">ATLAS MISSION CONTROL</h2>
+                  <p className="text-sm text-slate-400">Proactive Architectural Improvements</p>
                 </div>
               </div>
-
+              
               <div className="bg-white/5 rounded-3xl p-6 border border-white/5 space-y-4">
                 <div className="flex items-start space-x-3 text-slate-300">
                   <AlertCircle size={18} className="text-blue-400 mt-1 shrink-0" />
@@ -161,62 +156,48 @@ const Dashboard = () => {
                   </p>
                 </div>
               </div>
-
-              <div className="flex items-center space-x-4">
-                <Link to="/architect" className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/20">
-                  <span>Enter Architect Hub</span>
-                  <ChevronRight size={14} />
-                </Link>
-                <div className="flex -space-x-2">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="w-8 h-8 rounded-full border-2 border-[#0f172a] bg-slate-800 flex items-center justify-center">
-                      <div className="w-4 h-4 rounded-full bg-blue-500/50 animate-pulse" />
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
+          </div>
+        </div>
 
-            {/* Active Missions List */}
-            <div className="lg:w-2/5 space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ongoing Missions</span>
-                <span className="text-[10px] font-bold text-blue-400">{missions?.filter((m: any) => m.status !== 'COMPLETED').length || 0} Pending</span>
+        {/* Active Missions List */}
+        <div className="glass rounded-[2.5rem] p-8 flex flex-col">
+          <div className="flex items-center justify-between mb-6">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ongoing Missions</span>
+            <span className="text-[10px] font-bold text-blue-400">{missions?.filter((m: any) => m.status !== 'COMPLETED').length || 0} Pending</span>
+          </div>
+
+          <div className="space-y-3 flex-1 overflow-auto pr-2 custom-scrollbar">
+            {missions?.length === 0 ? (
+              <div className="text-center py-10 opacity-30">
+                <Target size={32} className="mx-auto mb-2 text-slate-600" />
+                <p className="text-[10px] font-bold uppercase">No Active Missions</p>
               </div>
-
-              <div className="space-y-3 max-h-[300px] overflow-auto pr-2 custom-scrollbar">
-                {missions?.length === 0 ? (
-                  <div className="text-center py-10 opacity-30">
-                    <Target size={32} className="mx-auto mb-2 text-slate-600" />
-                    <p className="text-[10px] font-bold uppercase">No Active Missions</p>
-                  </div>
-                ) : (
-                  missions?.map((mission: any) => (
-                    <div key={mission.id} className={`p-4 rounded-2xl border transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5'}`}>
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 pr-4">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${mission.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
-                                mission.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
-                                  'bg-blue-500/20 text-blue-400'
-                              }`}>{mission.priority}</span>
-                            <h4 className={`text-xs font-bold ${mission.status === 'COMPLETED' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{mission.title}</h4>
-                          </div>
-                          <p className="text-[10px] text-slate-500 line-clamp-1">{mission.description}</p>
-                        </div>
-                        <button
-                          onClick={() => updateMissionStatus(mission.id, mission.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')}
-                          className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-slate-600 hover:text-white hover:bg-white/10'
-                            }`}
-                        >
-                          <CheckCircle2 size={16} />
-                        </button>
+            ) : (
+              missions?.map((mission: any) => (
+                <div key={mission.id} className={`p-4 rounded-2xl border transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5'}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 pr-4">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${mission.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
+                            mission.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
+                              'bg-blue-500/20 text-blue-400'
+                          }`}>{mission.priority}</span>
+                        <h4 className={`text-xs font-bold ${mission.status === 'COMPLETED' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{mission.title}</h4>
                       </div>
+                      <p className="text-[10px] text-slate-500 line-clamp-1">{mission.description}</p>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
+                    <button
+                      onClick={() => updateMissionStatus(mission.id, mission.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')}
+                      className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-slate-600 hover:text-white hover:bg-white/10'
+                        }`}
+                    >
+                      <CheckCircle2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

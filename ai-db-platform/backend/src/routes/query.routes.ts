@@ -121,14 +121,25 @@ router.get('/history', asyncHandler(async (req: Request, res: Response) => {
 
 // POST /api/query/insights — Generate NL insights from results
 router.post('/insights', requireMinRole('ANALYST'), asyncHandler(async (req: Request, res: Response) => {
-  const { query: naturalQuery, results } = req.body;
+  const { query: naturalQuery, results, connectionId } = req.body;
 
   if (!results || !Array.isArray(results)) {
     throw new ApiError(400, "Results array is required for insights");
   }
 
+  let schemaContext = "";
+  if (connectionId) {
+    try {
+      const pool = await getConnectionPool(connectionId, req.user!.userId);
+      const schema = await extractSchema(pool);
+      schemaContext = formatSchemaForPrompt(schema);
+    } catch (err) {
+      console.error("Failed to extract schema for insights context", err);
+    }
+  }
+
   const { generateInsights } = require('../services/query.service');
-  const insights = await generateInsights(naturalQuery, results);
+  const insights = await generateInsights(naturalQuery, results, schemaContext);
 
   return res.status(200).json(
     new ApiResponse(200, insights, "Insights generated successfully")

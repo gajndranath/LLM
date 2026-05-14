@@ -53,7 +53,7 @@ router.post('/review', requireMinRole('ANALYST'), asyncHandler(async (req: Reque
     [req.user!.userId, connectionId, scale, requirements || null, JSON.stringify(review), review.scalability_score]
   );
 
-  // NEW: Save Jarvis Missions (Proactive Tasks)
+  // NEW: Save ATLAS Missions (Proactive Tasks)
   if (review.suggested_missions && review.suggested_missions.length > 0) {
     for (const mission of review.suggested_missions) {
       await query(

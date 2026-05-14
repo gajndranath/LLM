@@ -71,11 +71,12 @@ export const optimizeQuery = async (input: OptimizeQueryInput): Promise<Optimize
 };
 
 // ── Generate Insights ──────────────────────────────────────
-export const generateInsights = async (query: string, results: any[]) => {
+export const generateInsights = async (query: string, results: any[], schemaContext: string = "") => {
   try {
     const response = await aiClient.post('/generate-insights', {
       query,
       results,
+      schema_context: schemaContext,
     });
     return response.data;
   } catch (error: any) {

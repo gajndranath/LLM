@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 
 interface ChartRendererProps {
-  type: 'bar' | 'line' | 'pie' | 'area' | 'none';
+  type: 'bar' | 'line' | 'pie' | 'area' | 'table' | 'none';
   data: any[];
   xAxis?: string;
   yAxis?: string;
@@ -28,10 +28,30 @@ interface ChartRendererProps {
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4'];
 
 const ChartRenderer: React.FC<ChartRendererProps> = ({ type, data, xAxis, yAxis, label }) => {
-  if (type === 'none' || !data || data.length === 0 || !xAxis || !yAxis) {
+  if (type === 'none' || !data || data.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-slate-500 italic text-sm">
         No visualization recommended for this result set.
+      </div>
+    );
+  }
+
+  if (type === 'table') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3">
+        <div className="p-4 rounded-full bg-blue-500/10 text-blue-400">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        </div>
+        <p className="text-xs font-bold uppercase tracking-widest text-center">Data is best viewed as a Table</p>
+        <p className="text-[10px] text-slate-600">Switch to the Table tab for full details</p>
+      </div>
+    );
+  }
+
+  if (!xAxis || !yAxis) {
+    return (
+      <div className="h-full flex items-center justify-center text-slate-500 italic text-sm text-center px-6">
+        AI suggested a {type} chart but couldn't identify axes reliably.
       </div>
     );
   }

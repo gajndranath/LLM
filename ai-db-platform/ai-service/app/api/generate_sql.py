@@ -157,3 +157,21 @@ async def audit_senior_level_endpoint(
         return {"audit": audit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-schema-visuals")
+async def generate_schema_visuals_endpoint(
+    request_body: dict,
+    _ = Depends(verify_internal_secret)
+):
+    """
+    Generate ERD and DFD for a complete schema context.
+    """
+    llm_service = LLMService()
+    try:
+        result = await llm_service.generate_schema_diagrams(
+            request_body.get("schema_context")
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

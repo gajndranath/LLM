@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 
 class ChartRecommendation(BaseModel):
-    type: Literal["bar", "line", "pie", "area", "none"]
+    type: Literal["bar", "line", "pie", "area", "table", "none"]
     x_axis: Optional[str] = None
     y_axis: Optional[str] = None
     label: Optional[str] = None
@@ -44,9 +44,12 @@ class InsightsRequest(BaseModel):
 
 class InsightsResponse(BaseModel):
     summary: str
-    key_findings: List[str]
-    anomalies: List[str]
-    recommendations: List[str]
+    key_findings: List[str] = []
+    anomalies: List[str] = []
+    recommendations: List[str] = []
+    erd_mermaid: Optional[str] = None
+    dfd_mermaid: Optional[str] = None
+    flow_mermaid: Optional[str] = None
 
 class ArchitectureReviewRequest(BaseModel):
     schema_context: str
@@ -56,53 +59,74 @@ class ArchitectureReviewRequest(BaseModel):
 class ArchitectureFix(BaseModel):
     title: str
     sql: str
-    rollback_sql: str # NEW: SQL to undo the change
+    rollback_sql: str
     explanation: str
 
 class ArchitectureMission(BaseModel):
     title: str
     description: str
-    priority: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    priority: str
     reasoning: str
 
 class ArchitectureReviewResponse(BaseModel):
     executive_summary: str
-    component_analysis: List[Dict[str, Any]]
-    critical_mistakes: List[str]
-    improvement_plan: List[str]
-    suggested_fixes: List[ArchitectureFix] = [] # NEW: Detailed SQL fixes
-    suggested_missions: List[ArchitectureMission] = [] # NEW: Jarvis's proactive task list
-    scalability_score: int = Field(..., ge=0, le=100)
-    suggested_diagram_mermaid: str
+    component_analysis: List[Dict[str, Any]] = []
+    critical_mistakes: List[str] = []
+    improvement_plan: List[str] = []
+    suggested_fixes: List[ArchitectureFix] = []
+    suggested_missions: List[ArchitectureMission] = []
+    scalability_score: int = 0
+    suggested_diagram_mermaid: Optional[str] = None
 
 # ── Design Studio Schemas ────────────────────────────────────
 class RequirementProbeResponse(BaseModel):
-    probes: str  # AI-generated probing questions
+    probes: str
 
 class SchemaMigration(BaseModel):
     sql: str
     description: str
     rollback_sql: Optional[str] = None
 
+class EntityField(BaseModel):
+    column: str
+    type: str
+    notes: Optional[str] = None
+
 class Entity(BaseModel):
     name: str
-    fields: List[Dict[str, str]]
+    fields: List[EntityField] = []
     primary_key: Optional[str] = None
     indexes: List[str] = []
 
 class SchemaGenerationResponse(BaseModel):
-    entities: List[Entity]
-    relationships: List[Dict[str, str]]
-    sql_scripts: List[SchemaMigration]
-    erd_mermaid: str
-    normalization_level: Literal["1NF", "2NF", "3NF", "BCNF"]
-    scalability_notes: str
-    acid_compliance: bool
+    entities: List[Entity] = []
+    relationships: List[Dict[str, Any]] = []
+    sql_scripts: List[SchemaMigration] = []
+    erd_mermaid: Optional[str] = None
+    normalization_level: Optional[str] = "3NF"
+    scalability_notes: Optional[str] = None
+    acid_compliance: bool = True
+
+class AuditIssue(BaseModel):
+    category: str = "General"
+    severity: str = "MEDIUM"
+    title: str = "Issue"
+    detail: str = "No details provided"
+    table: Optional[str] = None
+
+class AuditImprovement(BaseModel):
+    category: str = "General"
+    priority: str = "MEDIUM"
+    title: str = "Improvement"
+    detail: str = "No details provided"
+    sql: Optional[str] = None
 
 class SeniorAuditResponse(BaseModel):
-    issues: List[Dict[str, str]]
-    improvements: List[Dict[str, str]]
-    performance_bottlenecks: List[str]
-    security_concerns: List[str]
-    recommendations: List[str]
-    health_score: int  # 0-100
+    issues: List[AuditIssue] = []
+    improvements: List[AuditImprovement] = []
+    performance_bottlenecks: List[str] = []
+    security_concerns: List[str] = []
+    recommendations: List[str] = []
+    health_score: int = 0
+    erd_mermaid: Optional[str] = None
+    dfd_mermaid: Optional[str] = None

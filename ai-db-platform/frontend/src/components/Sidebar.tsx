@@ -4,9 +4,7 @@ import {
   Database,
   Terminal,
   LogOut,
-  Box,
-  PenTool,
-  ShieldAlert
+  Wand2
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
@@ -15,11 +13,10 @@ const Sidebar = () => {
   const user = useAuthStore((state) => state.user);
 
   const navItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { name: 'SQL Copilot', icon: Terminal, path: '/query' },
-    { name: 'Design Studio', icon: PenTool, path: '/design-studio' },
-    { name: 'AI Architect', icon: ShieldAlert, path: '/architect' },
-    { name: 'Connections', icon: Database, path: '/connections' },
+    { name: 'Dashboard', icon: LayoutDashboard, path: '/', color: 'blue' },
+    { name: 'SQL Copilot', icon: Terminal, path: '/query', color: 'blue' },
+    { name: 'AI Architect', icon: Wand2, path: '/architect', color: 'purple' },
+    { name: 'Connections', icon: Database, path: '/connections', color: 'blue' },
   ];
 
   return (
@@ -38,7 +35,9 @@ const Sidebar = () => {
             to={item.path}
             className={({ isActive }) =>
               `flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 ${isActive
-                ? 'bg-blue-500/10 text-blue-400 shadow-[inset_0_0_20px_rgba(59,130,246,0.1)]'
+                ? item.color === 'purple'
+                  ? 'bg-purple-500/10 text-purple-400 shadow-[inset_0_0_20px_rgba(168,85,247,0.1)]'
+                  : 'bg-blue-500/10 text-blue-400 shadow-[inset_0_0_20px_rgba(59,130,246,0.1)]'
                 : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'
               }`
             }

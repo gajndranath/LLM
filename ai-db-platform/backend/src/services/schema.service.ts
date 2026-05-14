@@ -30,10 +30,13 @@ export interface SchemaContext {
   tables: TableInfo[];
   totalTables: number;
   extractedAt: string;
+  erd_mermaid?: string;
+  dfd_mermaid?: string;
+  flow_mermaid?: string;
 }
 
 // ── Extract Full Schema ────────────────────────────────────
-export const extractSchema = async (pool: Pool): Promise<SchemaContext> => {
+export const extractSchema = async (pool: Pool, includeVisuals = false): Promise<SchemaContext> => {
   const tables = await getTables(pool);
 
   const enrichedTables = await Promise.all(
@@ -46,11 +49,57 @@ export const extractSchema = async (pool: Pool): Promise<SchemaContext> => {
     })
   );
 
-  return {
+  const schemaContext: SchemaContext = {
     tables: enrichedTables,
     totalTables: enrichedTables.length,
     extractedAt: new Date().toISOString(),
   };
+
+  // 1. Generate basic ERD instantly
+  schemaContext.erd_mermaid = generateBasicERD(enrichedTables);
+
+  // 2. Generate AI DFD/Flow if requested (optional to save time/cost)
+  if (includeVisuals) {
+    const aiVisuals = await generateAISchemaVisuals(schemaContext);
+    schemaContext.dfd_mermaid = aiVisuals.dfd_mermaid;
+    schemaContext.flow_mermaid = aiVisuals.flow_mermaid;
+    if (aiVisuals.erd_mermaid) schemaContext.erd_mermaid = aiVisuals.erd_mermaid;
+  }
+
+  return schemaContext;
+};
+
+const generateBasicERD = (tables: TableInfo[]): string => {
+  let mermaid = 'erDiagram\n';
+  tables.forEach(table => {
+    mermaid += `  ${table.table_name} {\n`;
+    table.columns.forEach(col => {
+      const type = col.data_type.replace(/ /g, '_');
+      const pk = col.is_primary_key ? ' PK' : '';
+      mermaid += `    ${type} ${col.column_name}${pk}\n`;
+    });
+    mermaid += '  }\n';
+  });
+
+  tables.forEach(table => {
+    table.columns.forEach(col => {
+      if (col.is_foreign_key && col.foreign_table) {
+        mermaid += `  ${table.table_name} }|--|| ${col.foreign_table} : "references"\n`;
+      }
+    });
+  });
+  return mermaid;
+};
+
+const generateAISchemaVisuals = async (schema: SchemaContext) => {
+  try {
+    const { generateSchemaVisuals } = require('./architect.service');
+    const context = formatSchemaForPrompt(schema);
+    return await generateSchemaVisuals(context);
+  } catch (err) {
+    console.error("AI Schema Visuals failed", err);
+    return {};
+  }
 };
 
 // ── Format Schema for LLM Prompt ──────────────────────────
