@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(224 71% 4%);
+  --color-foreground: hsl(213 31% 91%);
+  
+  --color-card: hsl(224 71% 4%);
+  --color-card-foreground: hsl(213 31% 91%);
+  
+  --color-popover: hsl(224 71% 4%);
+  --color-popover-foreground: hsl(215 20.2% 65.1%);
+  
+  --color-primary: hsl(210 40% 98%);
+  --color-primary-foreground: hsl(222.2 47.4% 1.2%);
+  
+  --color-secondary: hsl(222.2 47.4% 11.2%);
+  --color-secondary-foreground: hsl(210 40% 98%);
+  
+  --color-muted: hsl(223 47% 11%);
+  --color-muted-foreground: hsl(215.4 16.3% 56.9%);
+  
+  --color-accent: hsl(216 34% 17%);
+  --color-accent-foreground: hsl(210 40% 98%);
+  
+  --color-destructive: hsl(0 62.8% 30.6%);
+  --color-destructive-foreground: hsl(210 40% 98%);
+  
+  --color-border: hsl(216 34% 17%);
+  --color-input: hsl(216 34% 17%);
+  --color-ring: hsl(216 34% 17%);
+  
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

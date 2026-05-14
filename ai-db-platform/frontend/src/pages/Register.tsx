@@ -1,0 +1,221 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  Mail,
+  Lock,
+  User,
+  ShieldCheck,
+  ArrowRight,
+  Loader2,
+  CheckCircle2,
+  Eye,
+  EyeOff
+} from 'lucide-react';
+import { api } from '../api/axiosInstance';
+import { useAuthStore } from '../store/authStore';
+import { toast } from 'sonner';
+
+const Register = () => {
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const setAuth = useAuthStore((state) => state.setAuth);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let storedId = localStorage.getItem('device_id');
+    if (!storedId) {
+      storedId = 'device_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('device_id', storedId);
+    }
+    setDeviceId(storedId);
+  }, []);
+
+  const handleRequestOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !email || !password) return toast.error("Please fill all details");
+
+    setLoading(true);
+    try {
+      await api.post('/auth/send-otp', { email });
+      toast.success("OTP sent to your email!");
+      setStep(2);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to send OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyAndRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp) return toast.error("Please enter OTP");
+
+    setLoading(true);
+    try {
+      const res = (await api.post('/auth/register', {
+        name,
+        email,
+        password,
+        otp,
+        deviceId
+      })) as any;
+
+      const { user, accessToken } = res.data.data;
+      setAuth(user, accessToken);
+      toast.success("Registration successful!");
+      navigate('/');
+    } catch (error: any) {
+      toast.error(error.message || "Registration failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6 relative overflow-hidden">
+      <div className="absolute top-0 right-0 -z-10 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl opacity-20 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 -z-10 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl opacity-20 pointer-events-none" />
+
+      <div className="w-full max-w-lg glass p-10 rounded-[2.5rem] shadow-2xl relative z-10 border border-white/5">
+        <div className="text-center mb-10">
+          <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-6 ring-1 ring-white/10">
+            <ShieldCheck size={32} className="text-blue-400" />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Create Account</h1>
+          <p className="text-slate-400 font-medium">Join the AI Database Revolution</p>
+        </div>
+
+        {step === 1 ? (
+          <form onSubmit={handleRequestOTP} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Full Name</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-blue-400 transition-colors">
+                  <User size={18} />
+                </div>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-black/20 border border-white/5 text-white pl-11 pr-4 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all placeholder:text-slate-600 font-medium"
+                  placeholder="Enter your name"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Email Address</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-blue-400 transition-colors">
+                  <Mail size={18} />
+                </div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-black/20 border border-white/5 text-white pl-11 pr-4 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all placeholder:text-slate-600 font-medium"
+                  placeholder="name@company.com"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Password</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-blue-400 transition-colors">
+                  <Lock size={18} />
+                </div>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-black/20 border border-white/5 text-white pl-11 pr-12 py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all placeholder:text-slate-600 font-medium"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-white text-black font-bold py-4 rounded-2xl flex items-center justify-center space-x-2 hover:bg-slate-200 transition-all active:scale-95 disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : (
+                <>
+                  <span>Send Verification Code</span>
+                  <ArrowRight size={20} />
+                </>
+              )}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleVerifyAndRegister} className="space-y-6">
+            <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl flex items-start space-x-3 mb-6">
+              <CheckCircle2 size={18} className="text-blue-400 mt-0.5" />
+              <p className="text-xs text-blue-200/80 leading-relaxed">
+                A 6-digit code has been sent to <strong>{email}</strong>.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">One-Time Password</label>
+              <input
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                maxLength={6}
+                className="w-full bg-black/20 border border-white/5 text-white text-center text-3xl tracking-[1rem] py-4 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40 transition-all font-bold"
+                placeholder="000000"
+                required
+              />
+            </div>
+
+            <div className="flex justify-between items-center px-1">
+              <button type="button" onClick={() => setStep(1)} className="text-xs text-slate-500 hover:text-white underline">Change details</button>
+              <button type="button" onClick={handleRequestOTP} className="text-xs text-blue-400 hover:text-blue-300 font-bold">Resend OTP</button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center space-x-2 hover:bg-blue-500 active:scale-95 disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : (
+                <>
+                  <ShieldCheck size={20} />
+                  <span>Verify & Create Account</span>
+                </>
+              )}
+            </button>
+          </form>
+        )}
+
+        <div className="mt-10 pt-8 border-t border-white/5 text-center">
+          <p className="text-slate-400 font-medium">
+            Already have an account?{' '}
+            <Link to="/login" className="text-white font-bold hover:text-blue-400 underline underline-offset-4">Login here</Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Register;
