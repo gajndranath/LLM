@@ -1,25 +1,54 @@
 import { Router, Request, Response } from 'express';
-import axios from 'axios';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth.middleware';
 import { getConnectionPool } from '../services/connection.service';
 import { extractSchema, formatSchemaForPrompt } from '../services/schema.service';
+import { aiClient } from '../services/aiClient';
 import { dbQuery as query } from '../config/database';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { env } from '../config/env';
+import { createRateLimiter } from '../middleware/rateLimit.middleware';
+import { validateRequest } from '../middleware/validation.middleware';
 
 const router = Router();
 router.use(authenticate);
 
-// Internal AI client (same pattern as query.service.ts)
-const aiClient = axios.create({
-  baseURL: env.AI_SERVICE_URL,
-  timeout: 90000, // 90s — schema generation can take a while
-  headers: {
-    'Content-Type': 'application/json',
-    'X-Internal-Secret': env.AI_SERVICE_SECRET,
-  },
+const studioRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 15,
+  message: "Too many requests to design studio. Please slow down.",
+  prefix: "studio"
+});
+
+// Zod Validation Schemas
+const createSessionSchema = z.object({
+  mode: z.enum(['new', 'existing']),
+  connectionId: z.string().uuid("Invalid connectionId UUID").optional().nullable(),
+}).refine(data => data.mode !== 'existing' || data.connectionId, {
+  message: "connectionId is required for existing mode",
+  path: ['connectionId']
+});
+
+const probeSchema = z.object({
+  sessionId: z.string().uuid("Invalid sessionId UUID"),
+  userMessage: z.string().min(1, "userMessage is required"),
+});
+
+const generateSchemaSchema = z.object({
+  sessionId: z.string().uuid("Invalid sessionId UUID"),
+});
+
+const auditExistingSchema = z.object({
+  sessionId: z.string().uuid("Invalid sessionId UUID").optional().nullable(),
+  connectionId: z.string().uuid("Invalid connectionId UUID"),
+  userConcerns: z.string().optional().nullable(),
+});
+
+const deploySchema = z.object({
+  sessionId: z.string().uuid("Invalid sessionId UUID"),
+  connectionId: z.string().uuid("Invalid connectionId UUID"),
 });
 
 // ── GET /api/design-studio/sessions — List all sessions ──────
@@ -36,15 +65,8 @@ router.get('/sessions', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ── POST /api/design-studio/sessions — Create new session ─────
-router.post('/sessions', asyncHandler(async (req: Request, res: Response) => {
+router.post('/sessions', studioRateLimiter, validateRequest(createSessionSchema), asyncHandler(async (req: Request, res: Response) => {
   const { mode, connectionId } = req.body;
-
-  if (!mode || !['new', 'existing'].includes(mode)) {
-    throw new ApiError(400, "mode must be 'new' or 'existing'");
-  }
-  if (mode === 'existing' && !connectionId) {
-    throw new ApiError(400, 'connectionId is required for existing mode');
-  }
 
   const result = await query(
     `INSERT INTO design_studio_sessions (user_id, mode, connection_id, requirements_transcript, status)
@@ -57,21 +79,17 @@ router.post('/sessions', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ── POST /api/design-studio/probe — AI asks requirements questions ─
-router.post('/probe', asyncHandler(async (req: Request, res: Response) => {
+router.post('/probe', studioRateLimiter, validateRequest(probeSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId, userMessage } = req.body;
-
-  if (!sessionId || !userMessage) {
-    throw new ApiError(400, 'sessionId and userMessage are required');
-  }
 
   // Load session + existing transcript + connection_id
   const sessionResult = await query(
     `SELECT id, requirements_transcript, connection_id FROM design_studio_sessions
-     WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+     WHERE id = $1 AND user_id = $2`,
     [sessionId, req.user!.userId]
   );
   if (sessionResult.rows.length === 0) {
-    throw new ApiError(404, 'Session not found or already completed');
+    throw new ApiError(404, 'Session not found');
   }
 
   const session = sessionResult.rows[0];
@@ -82,7 +100,7 @@ router.post('/probe', asyncHandler(async (req: Request, res: Response) => {
   if (session.connection_id) {
     try {
       const pool = await getConnectionPool(session.connection_id, req.user!.userId);
-      const schema = await extractSchema(pool);
+      const schema = await extractSchema(pool, session.connection_id);
       schemaContext = formatSchemaForPrompt(schema);
     } catch (err) {
       console.error("Failed to extract schema for probe context", err);
@@ -129,10 +147,8 @@ router.post('/probe', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // ── POST /api/design-studio/generate-schema — Build full blueprint ─
-router.post('/generate-schema', asyncHandler(async (req: Request, res: Response) => {
+router.post('/generate-schema', studioRateLimiter, validateRequest(generateSchemaSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req.body;
-
-  if (!sessionId) throw new ApiError(400, 'sessionId is required');
 
   const sessionResult = await query(
     `SELECT id, requirements_transcript FROM design_studio_sessions
@@ -148,9 +164,16 @@ router.post('/generate-schema', asyncHandler(async (req: Request, res: Response)
     .map((m: { role: string; content: string }) => `${m.role === 'user' ? 'User' : 'ATLAS'}: ${m.content}`)
     .join('\n');
 
-  const aiResponse = await aiClient.post('/design-studio/generate-schema', {
-    conversation_transcript: conversationTranscript,
-  });
+  let aiResponse;
+  try {
+    aiResponse = await aiClient.post('/design-studio/generate-schema', {
+      conversation_transcript: conversationTranscript,
+    });
+  } catch (err: any) {
+    const detail = err.response?.data?.detail || err.message;
+    console.error("AI Service Error:", detail);
+    throw new ApiError(500, `AI Schema Generation Failed: ${detail}`);
+  }
 
   const schema = aiResponse.data.schema;
 
@@ -165,15 +188,100 @@ router.post('/generate-schema', asyncHandler(async (req: Request, res: Response)
   return res.json(new ApiResponse(200, schema, 'Blueprint generated successfully'));
 }));
 
-// ── POST /api/design-studio/audit-existing — Full A-to-Z audit ──
-router.post('/audit-existing', asyncHandler(async (req: Request, res: Response) => {
-  const { sessionId, connectionId, userConcerns } = req.body;
+// ── POST /api/design-studio/deploy — Deploy generated schema to Live DB ──
+router.post('/deploy', studioRateLimiter, validateRequest(deploySchema), asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId, connectionId } = req.body;
 
-  if (!connectionId) throw new ApiError(400, 'connectionId is required');
+  // 1. Fetch the blueprint
+  const sessionResult = await query(
+    `SELECT current_design FROM design_studio_sessions 
+     WHERE id = $1 AND user_id = $2 AND status = 'completed'`,
+    [sessionId, req.user!.userId]
+  );
+
+  if (sessionResult.rows.length === 0 || !sessionResult.rows[0].current_design) {
+    throw new ApiError(404, 'No generated blueprint found for this session');
+  }
+
+  const design = sessionResult.rows[0].current_design;
+  const sqlScripts = design.sql_scripts || [];
+
+  if (sqlScripts.length === 0) {
+    throw new ApiError(400, 'Blueprint contains no SQL scripts to deploy');
+  }
+
+  // 2. Connect to the target DB
+  const targetPool = await getConnectionPool(connectionId, req.user!.userId);
+  const client = await targetPool.connect();
+
+  let combinedSqlExecuted = "";
+  let combinedRollbackSql = "";
+  
+  try {
+    await client.query('BEGIN'); // Start transaction
+
+    // 3. Execute all scripts sequentially
+    for (const script of sqlScripts) {
+      if (script.sql) {
+        // Sanitize: fix known AI-generated SQL issues before executing
+        let sanitizedSql = script.sql
+          // Fix unquoted extension names containing hyphens (e.g. uuid-ossp → "uuid-ossp")
+          .replace(/CREATE EXTENSION\s+IF NOT EXISTS\s+([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)/gi,
+            (_match: string, extName: string) => `CREATE EXTENSION IF NOT EXISTS "${extName}"`)
+          // Fix double-escaped newlines from JSON serialization
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t');
+
+        await client.query(sanitizedSql);
+        combinedSqlExecuted += `${sanitizedSql}\n\n`;
+        
+        // Accumulate rollbacks in reverse order (LIFO)
+        if (script.rollback_sql) {
+          combinedRollbackSql = `${script.rollback_sql}\n\n` + combinedRollbackSql;
+        }
+      }
+    }
+
+    // 4. Log the transaction as a single mutation in ATLAS core DB
+    await query(
+      `INSERT INTO architect_mutations 
+       (user_id, connection_id, title, description, sql_executed, rollback_sql, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'APPLIED')`,
+      [
+        req.user!.userId,
+        connectionId,
+        "Deployed AI Blueprint",
+        `Created ${design.entities?.length || 0} tables via Architect Studio (Session: ${sessionId})`,
+        combinedSqlExecuted.trim(),
+        combinedRollbackSql.trim() || null
+      ]
+    );
+
+    // 5. Update session connection_id if it was null
+    await query(
+      `UPDATE design_studio_sessions SET connection_id = $1 WHERE id = $2`,
+      [connectionId, sessionId]
+    );
+
+    await client.query('COMMIT'); // Commit transaction
+    
+    return res.json(new ApiResponse(200, null, 'Blueprint successfully deployed to live database!'));
+  } catch (err: any) {
+    await client.query('ROLLBACK'); // Rollback everything if any script fails
+    console.error("Blueprint deployment failed, rolling back:", err);
+    throw new ApiError(500, `Deployment failed at runtime: ${err.message}`);
+  } finally {
+    client.release();
+  }
+}));
+
+// ── POST /api/design-studio/audit-existing — Full A-to-Z audit ──
+router.post('/audit-existing', studioRateLimiter, validateRequest(auditExistingSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { sessionId, connectionId, userConcerns } = req.body;
 
   // Pull the live schema from user's database
   const pool = await getConnectionPool(connectionId, req.user!.userId);
-  const schema = await extractSchema(pool);
+  const schema = await extractSchema(pool, connectionId);
   const schemaText = formatSchemaForPrompt(schema);
 
   // Call the senior audit
@@ -184,7 +292,7 @@ router.post('/audit-existing', asyncHandler(async (req: Request, res: Response) 
 
   const auditResult = aiResponse.data.audit;
 
-  // Persist audit result if a session was provided
+  // 1. Persist audit result in active design studio session if provided
   if (sessionId) {
     await query(
       `UPDATE design_studio_sessions
@@ -194,17 +302,62 @@ router.post('/audit-existing', asyncHandler(async (req: Request, res: Response) 
     );
   }
 
+  // 2. Persist audit result in architect_audits (general history) to keep score and history updated
+  await query(
+    `INSERT INTO architect_audits 
+      (user_id, connection_id, scale, requirements, review_data, scalability_score)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      req.user!.userId,
+      connectionId,
+      '1M rows',
+      userConcerns || 'Studio Audit',
+      JSON.stringify(auditResult),
+      auditResult.health_score || 70
+    ]
+  );
+
+  // 3. Persist suggested missions — deduplicated by (user_id, connection_id, title)
+  const improvements = auditResult.improvements || auditResult.issues || [];
+  if (improvements.length > 0) {
+    for (const imp of improvements) {
+      await query(
+        `INSERT INTO architect_missions 
+          (user_id, connection_id, title, description, priority, ai_reasoning, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PLANNED')
+         ON CONFLICT (user_id, connection_id, title) DO NOTHING`,
+        [
+          req.user!.userId,
+          connectionId,
+          imp.title,
+          imp.detail || imp.description || 'Audit recommendation',
+          imp.priority || imp.severity || 'MEDIUM',
+          imp.detail || 'Suggested by A-to-Z audit'
+        ]
+      );
+    }
+  }
+
   return res.json(new ApiResponse(200, auditResult, 'A-to-Z audit completed'));
 }));
 
-// ── DELETE /api/design-studio/sessions/:id — Archive a session ──
+// ── DELETE /api/design-studio/sessions/:id — Hard delete a session ──
 router.delete('/sessions/:id', asyncHandler(async (req: Request, res: Response) => {
-  await query(
-    `UPDATE design_studio_sessions SET status = 'archived', updated_at = NOW()
+  const { id } = req.params;
+  const parseResult = z.string().uuid("Invalid session ID format").safeParse(id);
+  if (!parseResult.success) {
+    throw new ApiError(400, parseResult.error.issues[0].message);
+  }
+
+  const result = await query(
+    `DELETE FROM design_studio_sessions 
      WHERE id = $1 AND user_id = $2`,
-    [req.params.id, req.user!.userId]
+    [id, req.user!.userId]
   );
-  return res.json(new ApiResponse(200, null, 'Session archived'));
+  if (result.rowCount === 0) {
+    throw new ApiError(404, 'Session not found');
+  }
+  return res.json(new ApiResponse(200, null, 'Session deleted successfully'));
 }));
 
 export default router;

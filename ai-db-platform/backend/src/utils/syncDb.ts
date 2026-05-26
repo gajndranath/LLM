@@ -10,7 +10,7 @@ export const syncSchema = async () => {
   console.log('🔄 Starting database schema sync...');
   
   try {
-    const schemaPath = path.join(__dirname, '../models/schema.sql');
+    const schemaPath = path.join(__dirname, '../db/schema.sql');
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     
     // Split by semicolon but ignore ones inside functions

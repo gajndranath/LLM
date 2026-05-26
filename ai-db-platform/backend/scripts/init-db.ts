@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 // Load env
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -34,7 +34,10 @@ const initDb = async () => {
         status VARCHAR(20),
         ai_reasoning TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        -- Deduplication: same user cannot have the same mission title on the same
+        -- connection no matter how many audit or studio runs trigger the insert.
+        UNIQUE(user_id, connection_id, title)
     );`,
     `CREATE INDEX IF NOT EXISTS idx_architect_audits_user ON architect_audits(user_id);`,
     `CREATE INDEX IF NOT EXISTS idx_architect_audits_conn ON architect_audits(connection_id);`,

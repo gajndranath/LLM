@@ -2,34 +2,36 @@ import { Pool, PoolClient } from 'pg';
 import { dbQuery as query } from '../config/database';
 import { encrypt, decrypt } from '../utils/encryption';
 import { ApiError } from '../utils/ApiError';
+import { env } from '../config/env';
 
-export interface ConnectionInput {
-  name: string;
-  host: string;
-  port?: number;
-  databaseName: string;
-  username: string;
-  password: string;
-  sslEnabled?: boolean;
-}
-
-export interface ConnectionRow {
-  id: string;
-  user_id: string;
-  name: string;
-  host: string;
-  port: number;
-  database_name: string;
-  username: string;
-  ssl_enabled: boolean;
-  is_active: boolean;
-  last_tested_at: string | null;
-  last_test_ok: boolean | null;
-  created_at: string;
-}
+import { ConnectionInput, ConnectionRow } from '../types/connection.types';
 
 // Pool cache — avoid recreating pools on every request
 const poolCache = new Map<string, Pool>();
+const poolLastAccess = new Map<string, number>();
+
+// Evict inactive pools (inactive > 10 minutes) every 5 minutes
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const INACTIVE_LIMIT_MS = 10 * 60 * 1000;
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const [connectionId, lastAccess] of poolLastAccess.entries()) {
+    if (now - lastAccess > INACTIVE_LIMIT_MS) {
+      const pool = poolCache.get(connectionId);
+      if (pool) {
+        console.log(`[ATLAS Cache] Evicting idle database pool: ${connectionId}`);
+        try {
+          await pool.end();
+        } catch (err: any) {
+          console.error(`Error ending evicted pool:`, err.message);
+        }
+        poolCache.delete(connectionId);
+      }
+      poolLastAccess.delete(connectionId);
+    }
+  }
+}, CLEANUP_INTERVAL_MS).unref();
 
 // ── Create Connection ──────────────────────────────────────
 export const createConnection = async (
@@ -96,6 +98,7 @@ export const getConnectionPool = async (
 ): Promise<Pool> => {
   // Return cached pool if exists
   if (poolCache.has(connectionId)) {
+    poolLastAccess.set(connectionId, Date.now());
     return poolCache.get(connectionId)!;
   }
 
@@ -111,15 +114,46 @@ export const getConnectionPool = async (
     max: 5,                         // Small pool — user connections
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
-    ssl: conn.ssl_enabled ? { rejectUnauthorized: false } : false,
+    ssl: conn.ssl_enabled
+      ? (env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : { rejectUnauthorized: false })
+      : false,
   });
 
   pool.on('error', (err) => {
     console.error(`Pool error for connection ${connectionId}:`, err.message);
     poolCache.delete(connectionId);
+    poolLastAccess.delete(connectionId);
   });
 
+  // Evict LRU if cache size exceeds limit (Max 10 active pools)
+  if (poolCache.size >= 10) {
+    let oldestId: string | null = null;
+    let oldestTime = Infinity;
+
+    for (const [id, lastAccess] of poolLastAccess.entries()) {
+      if (lastAccess < oldestTime) {
+        oldestTime = lastAccess;
+        oldestId = id;
+      }
+    }
+
+    if (oldestId) {
+      const oldestPool = poolCache.get(oldestId);
+      if (oldestPool) {
+        console.log(`[ATLAS Cache] LRU evicting pool: ${oldestId}`);
+        try {
+          await oldestPool.end();
+        } catch (err: any) {
+          console.error(`Error ending LRU evicted pool:`, err.message);
+        }
+        poolCache.delete(oldestId);
+      }
+      poolLastAccess.delete(oldestId);
+    }
+  }
+
   poolCache.set(connectionId, pool);
+  poolLastAccess.set(connectionId, Date.now());
   return pool;
 };
 

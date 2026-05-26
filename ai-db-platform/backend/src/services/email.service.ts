@@ -9,6 +9,7 @@ export const sendEmail = async (options: {
   subject: string;
   text?: string;
   html?: string;
+  otp?: string;
 }) => {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -34,8 +35,23 @@ export const sendEmail = async (options: {
     return info;
   } catch (error) {
     console.error('❌ Failed to send email:', error);
+    
+    if (options.otp && env.NODE_ENV !== 'production') {
+      console.warn(`
+┌────────────────────────────────────────────────────────┐
+│  ⚠️  DEVELOPER WARNING: EMAIL DELIVERY FAILED          │
+│                                                        │
+│  To: ${options.to.padEnd(46)} │
+│  Subject: ${options.subject.padEnd(41)} │
+│  OTP Code: ${options.otp.padEnd(44)} │
+│                                                        │
+│  Please use the OTP code above to proceed in dev mode. │
+└────────────────────────────────────────────────────────┘
+      `);
+    }
+
     // Don't throw if we want the app to keep running during dev without SMTP
-    if (process.env.NODE_ENV === 'production') throw error;
+    if (env.NODE_ENV === 'production') throw error;
   }
 };
 
@@ -62,5 +78,6 @@ export const sendOTPEmail = async (email: string, otp: string) => {
     to: email,
     subject: `Verify Your Account — OTP: ${otp}`,
     html,
+    otp,
   });
 };

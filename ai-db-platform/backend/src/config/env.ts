@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // Validate required env variables
-const required = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'ENCRYPTION_KEY'];
+const required = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'ENCRYPTION_KEY', 'AI_SERVICE_SECRET'];
 for (const key of required) {
   if (!process.env[key]) {
     throw new Error(`❌ Missing required environment variable: ${key}`);
@@ -37,7 +37,7 @@ export const env = {
 
   // AI Service
   AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
-  AI_SERVICE_SECRET: process.env.AI_SERVICE_SECRET || '',
+  AI_SERVICE_SECRET: process.env.AI_SERVICE_SECRET!,
 
   // Query limits
   MAX_QUERY_ROWS: parseInt(process.env.MAX_QUERY_ROWS || '10000', 10),

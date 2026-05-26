@@ -1,44 +1,7 @@
-import axios, { AxiosError } from 'axios';
-import { env } from '../config/env';
+import { aiClient } from './aiClient';
 import { ApiError } from '../utils/ApiError';
 
-export interface GenerateSQLInput {
-  naturalQuery: string;
-  schemaContext: string;
-  connectionId: string;
-  dialect?: string;
-}
-
-export interface GenerateSQLResult {
-  sql: string;
-  explanation: string;
-  warnings: string[];
-  provider: string;
-  model: string;
-  confidence: number;
-}
-
-export interface OptimizeQueryInput {
-  sql: string;
-  schemaContext: string;
-  explainPlan?: unknown;
-}
-
-export interface OptimizeQueryResult {
-  optimizedSql: string;
-  issues: string[];
-  suggestions: string[];
-  indexRecommendations: string[];
-}
-
-const aiClient = axios.create({
-  baseURL: env.AI_SERVICE_URL,
-  timeout: 60000,  // 60s for AI calls
-  headers: {
-    'Content-Type': 'application/json',
-    'X-Internal-Secret': env.AI_SERVICE_SECRET,
-  },
-});
+import { GenerateSQLInput, GenerateSQLResult, OptimizeQueryInput, OptimizeQueryResult } from '../types/execution.types';
 
 // ── Generate SQL ───────────────────────────────────────────
 export const generateSQL = async (input: GenerateSQLInput): Promise<GenerateSQLResult> => {

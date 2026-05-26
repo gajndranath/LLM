@@ -4,10 +4,17 @@ import { env } from '../config/env';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
-const KEY = Buffer.from(env.ENCRYPTION_KEY.padEnd(32).slice(0, 32));
+
+// New key: scrypt-derived (production-grade KDF)
+const SALT = 'atlas_encryption_salt_value_must_be_stable';
+const KEY = crypto.scryptSync(env.ENCRYPTION_KEY, SALT, 32);
+
+// Legacy key: padEnd-derived (used before production hardening)
+const LEGACY_KEY = Buffer.from(env.ENCRYPTION_KEY.padEnd(32).slice(0, 32));
 
 /**
  * Encrypt sensitive data (e.g. DB passwords)
+ * Always uses the new scrypt-derived key.
  * Returns: iv:tag:encrypted (hex encoded)
  */
 export const encrypt = (plaintext: string): string => {
@@ -29,9 +36,9 @@ export const encrypt = (plaintext: string): string => {
 };
 
 /**
- * Decrypt sensitive data
+ * Internal: attempt decryption with a specific key
  */
-export const decrypt = (encryptedData: string): string => {
+const decryptWithKey = (encryptedData: string, key: Buffer): string => {
   const [ivHex, tagHex, encryptedHex] = encryptedData.split(':');
 
   if (!ivHex || !tagHex || !encryptedHex) {
@@ -42,10 +49,24 @@ export const decrypt = (encryptedData: string): string => {
   const tag = Buffer.from(tagHex, 'hex');
   const encrypted = Buffer.from(encryptedHex, 'hex');
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, KEY, iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
 
   return decipher.update(encrypted).toString('utf8') + decipher.final('utf8');
+};
+
+/**
+ * Decrypt sensitive data.
+ * Tries the new scrypt key first; if it fails, falls back to the legacy key
+ * (for credentials encrypted before the production hardening upgrade).
+ */
+export const decrypt = (encryptedData: string): string => {
+  try {
+    return decryptWithKey(encryptedData, KEY);
+  } catch {
+    // Fallback: try legacy key for pre-upgrade data
+    return decryptWithKey(encryptedData, LEGACY_KEY);
+  }
 };
 
 /**
@@ -54,3 +75,4 @@ export const decrypt = (encryptedData: string): string => {
 export const hashString = (input: string): string => {
   return crypto.createHash('sha256').update(input + env.ENCRYPTION_KEY).digest('hex');
 };
+

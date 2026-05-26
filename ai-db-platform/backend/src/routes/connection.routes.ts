@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth.middleware';
 import {
   createConnection,
@@ -8,6 +9,7 @@ import {
   getConnectionPool,
 } from '../services/connection.service';
 import { extractSchema } from '../services/schema.service';
+import { validateRequest } from '../middleware/validation.middleware';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 
@@ -16,14 +18,26 @@ const router = Router();
 // All connection routes require authentication
 router.use(authenticate);
 
+const connectionSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+  host: z.string().min(1, "Host is required"),
+  port: z.number().int().min(1).max(65535).optional(),
+  databaseName: z.string().min(1, "Database name is required"),
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+  sslEnabled: z.boolean().optional(),
+});
+
 // POST /api/connections
-router.post('/', asyncHandler(async (req: Request, res: Response) => {
+router.post('/', validateRequest(connectionSchema), asyncHandler(async (req: Request, res: Response) => {
   const { name, host, port, databaseName, username, password, sslEnabled } = req.body;
   
   const connection = await createConnection(req.user!.userId, {
     name, host, port, databaseName, username, password, sslEnabled,
   });
   
+  console.log(`[AUDIT] User ${req.user!.userId} created db_connection ${connection.id} (${connection.name})`);
+
   return res.status(201).json(
     new ApiResponse(201, connection, "Connection created successfully")
   );
@@ -61,6 +75,8 @@ router.get('/:id/schema', asyncHandler(async (req: Request, res: Response) => {
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   await deleteConnection(req.params.id, req.user!.userId);
   
+  console.log(`[AUDIT] User ${req.user!.userId} deleted db_connection ${req.params.id}`);
+
   return res.status(200).json(
     new ApiResponse(200, null, "Connection deleted successfully")
   );

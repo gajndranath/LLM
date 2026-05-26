@@ -2,13 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import http from 'http';
-import { Server as SocketServer } from 'socket.io';
+import crypto from 'crypto';
 
 // Core config
 import { env } from './config/env';
-import { testDatabaseConnection } from './config/database';
-import { testRedisConnection } from './config/redis';
+import { testDatabaseConnection, dbQuery } from './config/database';
+import { testRedisConnection, redisClient, getRedisStatus } from './config/redis';
 
 // Middleware
 import { errorHandler } from './middleware/error.middleware';
@@ -20,25 +19,40 @@ import queryRoutes from './routes/query.routes';
 import architectRoutes from './routes/architect.routes';
 import missionRoutes from './routes/mission.routes';
 import designStudioRoutes from './routes/design-studio.routes';
+import tableInspectorRoutes from './routes/table-inspector.routes';
 
 const app = express();
-const server = http.createServer(app);
-
-// ── Socket.IO Setup ──────────────────────────────────────────
-export const io = new SocketServer(server, {
-  cors: { 
-    origin: env.FRONTEND_URL, 
-    credentials: true 
-  }
-});
-
-io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`);
-  socket.on('disconnect', () => console.log(`🔌 Client disconnected: ${socket.id}`));
-});
 
 // ── Standard Middleware ──────────────────────────────────────
 app.use(helmet());
+
+// Request ID & Logging Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
+  (req as any).id = requestId;
+  res.setHeader('X-Request-Id', requestId);
+
+  const startTime = Date.now();
+  console.log(`📡 [${requestId}] ${req.method} ${req.url} - Request received`);
+
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    console.log(`📡 [${requestId}] ${req.method} ${req.url} - Completed ${res.statusCode} in ${duration}ms`);
+  });
+
+  next();
+});
+
+// Enforce HTTPS redirection in production when behind reverse proxies
+if (env.NODE_ENV === 'production') {
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    next();
+  });
+}
+
 app.use(cors({
   origin: env.FRONTEND_URL,
   credentials: true,
@@ -49,18 +63,46 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── API Health Endpoint ──────────────────────────────────────
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+app.get('/api/health', async (req: Request, res: Response) => {
+  let postgresStatus = 'unknown';
+  let redisStatus = 'unknown';
+
+  try {
+    const pgResult = await dbQuery('SELECT 1');
+    if (pgResult) postgresStatus = 'connected';
+  } catch (err: any) {
+    postgresStatus = `error: ${err.message}`;
+  }
+
+  if (getRedisStatus()) {
+    try {
+      const pingResult = await redisClient.ping();
+      if (pingResult === 'PONG') redisStatus = 'connected';
+    } catch (err: any) {
+      redisStatus = `error: ${err.message}`;
+    }
+  } else {
+    redisStatus = 'disconnected';
+  }
+
+  const overallStatus = (postgresStatus === 'connected' && (redisStatus === 'connected' || redisStatus === 'disconnected')) ? 'ok' : 'degraded';
+
+  return res.status(overallStatus === 'ok' ? 200 : 503).json({
+    status: overallStatus,
     timestamp: new Date().toISOString(),
     service: 'ai-db-platform-backend',
-    node_env: env.NODE_ENV
+    node_env: env.NODE_ENV,
+    checks: {
+      postgres: postgresStatus,
+      redis: redisStatus
+    }
   });
 });
 
 // ── Application Routes ───────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/connections', connectionRoutes);
+app.use('/api/connections', tableInspectorRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/architect', architectRoutes);
 app.use('/api/missions', missionRoutes);
@@ -75,6 +117,8 @@ app.use((req: Request, res: Response) => {
 app.use(errorHandler);
 
 // ── System Initialization ────────────────────────────────────
+import { startCleanupScheduler } from './services/cleanup.service';
+
 const bootstrap = async () => {
   try {
     console.log('🏁 Initializing AI DB Platform Backend...');
@@ -89,10 +133,12 @@ const bootstrap = async () => {
       console.warn('⚠️ Redis connection failed. Proceeding without cache.');
     }
 
-    // 3. Listen for requests
-    server.listen(env.PORT, () => {
+    // 3. Start periodic DB cleanup tasks
+    startCleanupScheduler();
+
+    // 4. Listen for requests
+    app.listen(env.PORT, () => {
       console.log(`\n🚀 Backend Live: http://localhost:${env.PORT}`);
-      console.log(`📡 WebSocket: Active`);
       console.log(`🌍 Environment: ${env.NODE_ENV}\n`);
     });
 

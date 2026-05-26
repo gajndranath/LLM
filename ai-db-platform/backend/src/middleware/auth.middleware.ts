@@ -2,14 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 
-export interface JwtPayload {
-  userId: string;
-  email: string;
-  role: UserRole;
-  organizationId?: string;
-}
+import { JwtPayload, UserRole } from '../types/auth.types';
 
-export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'DISPATCHER' | 'DRIVER' | 'ANALYST' | 'VIEWER';
+export { JwtPayload, UserRole };
 
 // Extend Express Request
 declare global {

@@ -3,39 +3,14 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { dbQuery as query } from '../config/database';
 import { env } from '../config/env';
-import { JwtPayload, UserRole } from '../middleware/auth.middleware';
+import { JwtPayload, UserRole, RegisterInput, LoginInput, AuthResult } from '../types/auth.types';
 import { ApiError } from '../utils/ApiError';
 import { validateEmail, validatePassword } from '../utils/validators';
 import { sendEmail, sendOTPEmail } from './email.service';
-import { redisClient } from '../config/redis';
+import { redisClient, getRedisStatus } from '../config/redis';
 
 const SALT_ROUNDS = 12;
 
-export interface RegisterInput {
-  name: string;
-  email: string;
-  password: string;
-  otp: string;
-  deviceId?: string;
-  role?: UserRole;
-}
-
-export interface LoginInput {
-  email: string;
-  password: string;
-  deviceId?: string;
-}
-
-export interface AuthResult {
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    role: UserRole;
-  };
-  accessToken: string;
-  refreshToken: string;
-}
 
 /**
  * 1. Request OTP for Registration
@@ -45,14 +20,23 @@ export const requestOTP = async (email: string) => {
     throw new ApiError(400, "Invalid email format");
   }
 
-  // Generate 6-digit OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate 6-digit OTP using cryptographically secure random number
+  const otp = crypto.randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
   // Store OTP (Prefer Redis, fallback to Postgres)
-  try {
-    await redisClient.setEx(`otp:${email}`, 300, otp);
-  } catch {
+  if (getRedisStatus()) {
+    try {
+      await redisClient.setEx(`otp:${email}`, 300, otp);
+    } catch (err) {
+      console.warn("Failed to save OTP to Redis, falling back to Postgres:", err);
+      await query(
+        'INSERT INTO verification_otps (email, otp, expires_at) VALUES ($1, $2, $3)',
+        [email, otp, expiresAt]
+      );
+    }
+  } else {
+    console.warn("Redis is offline, writing OTP directly to Postgres");
     await query(
       'INSERT INTO verification_otps (email, otp, expires_at) VALUES ($1, $2, $3)',
       [email, otp, expiresAt]
@@ -69,7 +53,8 @@ export const requestOTP = async (email: string) => {
  * 2. Verify OTP and Complete Registration
  */
 export const register = async (input: RegisterInput): Promise<AuthResult> => {
-  const { name, email, password, otp, deviceId, role = 'ANALYST' } = input;
+  const { name, email, password, otp } = input;
+  const role = 'ANALYST';
 
   // 1. Validate Input
   if (!name || name.trim().length < 2) {
@@ -81,15 +66,27 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
 
   // 2. Verify OTP
   let isValid = false;
-  try {
-    const storedOtp = await redisClient.get(`otp:${email}`);
-    if (storedOtp === otp) isValid = true;
-  } catch {
+  if (getRedisStatus()) {
+    try {
+      const storedOtp = await redisClient.get(`otp:${email}`);
+      if (storedOtp === otp) {
+        isValid = true;
+      }
+    } catch (err) {
+      console.warn("Redis OTP fetch failed, checking Postgres fallback:", err);
+    }
+  } else {
+    console.warn("Redis is offline, looking up OTP in Postgres");
+  }
+
+  if (!isValid) {
     const result = await query(
       'SELECT id FROM verification_otps WHERE email = $1 AND otp = $2 AND expires_at > NOW()',
       [email, otp]
     );
-    if (result.rows.length > 0) isValid = true;
+    if (result.rows.length > 0) {
+      isValid = true;
+    }
   }
 
   if (!isValid) {
@@ -105,25 +102,31 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
   const result = await query(
-    `INSERT INTO users (name, email, password_hash, role, device_id)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO users (name, email, password_hash, role)
+     VALUES ($1, $2, $3, $4)
      RETURNING id, name, email, role`,
-    [name, email.toLowerCase(), passwordHash, role, deviceId || null]
+    [name, email.toLowerCase(), passwordHash, role]
   );
 
   const user = result.rows[0];
   
   // Cleanup OTP
-  try { await redisClient.del(`otp:${email}`); } catch {
-    await query('DELETE FROM verification_otps WHERE email = $1', [email]);
+  if (getRedisStatus()) {
+    try {
+      await redisClient.del(`otp:${email}`);
+    } catch (err) {
+      console.warn("Failed to delete OTP from Redis:", err);
+    }
   }
+  await query('DELETE FROM verification_otps WHERE email = $1', [email]);
 
+  console.log(`[AUDIT] User registered: ${user.id} (${user.email}) with role: ${user.role}`);
   return generateAuthResult(user);
 };
 
 // ── Login ──────────────────────────────────────────────────
 export const login = async (input: LoginInput): Promise<AuthResult> => {
-  const { email, password, deviceId } = input;
+  const { email, password } = input;
 
   const result = await query(
     `SELECT id, name, email, role, password_hash, is_active, device_id
@@ -146,10 +149,10 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
     throw new ApiError(401, 'Invalid email or password');
   }
 
-  // Update last login and device_id if provided
+  // Update last login
   await query(
-    'UPDATE users SET last_login_at = NOW(), device_id = COALESCE($2, device_id) WHERE id = $1',
-    [user.id, deviceId || null]
+    'UPDATE users SET last_login_at = NOW() WHERE id = $1',
+    [user.id]
   );
 
   return generateAuthResult(user);
@@ -159,17 +162,32 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
  * 3. Forgot Password - Send OTP
  */
 export const forgotPassword = async (email: string) => {
+  // SECURITY: We do NOT reveal whether this email is registered.
+  // We silently check and only generate/send an OTP if the account exists.
   const result = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+
+  // Always return the same generic message regardless of outcome
+  // to prevent email enumeration attacks.
   if (result.rows.length === 0) {
-    throw new ApiError(404, "No account found with this email");
+    return { message: "If this email is registered, a reset OTP will be sent." };
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate 6-digit OTP using cryptographically secure random number
+  const otp = crypto.randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-  try {
-    await redisClient.setEx(`reset_otp:${email}`, 600, otp);
-  } catch {
+  if (getRedisStatus()) {
+    try {
+      await redisClient.setEx(`reset_otp:${email}`, 600, otp);
+    } catch (err) {
+      console.warn("Failed to save reset OTP to Redis, falling back to Postgres:", err);
+      await query(
+        'INSERT INTO verification_otps (email, otp, expires_at) VALUES ($1, $2, $3)',
+        [email, otp, expiresAt]
+      );
+    }
+  } else {
+    console.warn("Redis is offline, writing reset OTP directly to Postgres");
     await query(
       'INSERT INTO verification_otps (email, otp, expires_at) VALUES ($1, $2, $3)',
       [email, otp, expiresAt]
@@ -184,9 +202,10 @@ export const forgotPassword = async (email: string) => {
       <p>Your OTP to reset password is: <b style="font-size: 24px; color: #3b82f6;">${otp}</b></p>
       <p>This code will expire in 10 minutes.</p>
     </div>`,
+    otp,
   });
 
-  return { message: "Reset OTP sent to your email" };
+  return { message: "If this email is registered, a reset OTP will be sent." };
 };
 
 /**
@@ -198,26 +217,44 @@ export const resetPassword = async (email: string, otp: string, newPassword: str
   }
 
   let isValid = false;
-  try {
-    const storedOtp = await redisClient.get(`reset_otp:${email}`);
-    if (storedOtp === otp) isValid = true;
-  } catch {
+  if (getRedisStatus()) {
+    try {
+      const storedOtp = await redisClient.get(`reset_otp:${email}`);
+      if (storedOtp === otp) {
+        isValid = true;
+      }
+    } catch (err) {
+      console.warn("Redis reset OTP fetch failed, checking Postgres fallback:", err);
+    }
+  } else {
+    console.warn("Redis is offline, looking up reset OTP in Postgres");
+  }
+
+  if (!isValid) {
     const result = await query(
       'SELECT id FROM verification_otps WHERE email = $1 AND otp = $2 AND expires_at > NOW()',
       [email, otp]
     );
-    if (result.rows.length > 0) isValid = true;
+    if (result.rows.length > 0) {
+      isValid = true;
+    }
   }
 
   if (!isValid) throw new ApiError(400, "Invalid or expired OTP");
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
   await query('UPDATE users SET password_hash = $1 WHERE email = $2', [passwordHash, email.toLowerCase()]);
+  console.log(`[AUDIT] Password reset for user: ${email.toLowerCase()}`);
 
   // Cleanup
-  try { await redisClient.del(`reset_otp:${email}`); } catch {
-    await query('DELETE FROM verification_otps WHERE email = $1', [email]);
+  if (getRedisStatus()) {
+    try {
+      await redisClient.del(`reset_otp:${email}`);
+    } catch (err) {
+      console.warn("Failed to delete reset OTP from Redis:", err);
+    }
   }
+  await query('DELETE FROM verification_otps WHERE email = $1', [email]);
 
   return { message: "Password reset successful" };
 };
@@ -264,7 +301,7 @@ export const logout = async (refreshToken: string): Promise<void> => {
 // ── Get Current User ──────────────────────────────────────
 export const getMe = async (userId: string) => {
   const result = await query(
-    'SELECT id, name, email, role, created_at, last_login_at, device_id FROM users WHERE id = $1',
+    'SELECT id, name, email, role, created_at, last_login_at FROM users WHERE id = $1',
     [userId]
   );
   if (result.rows.length === 0) throw new ApiError(404, 'User not found');

@@ -61,6 +61,22 @@ const sql = `
 
   CREATE INDEX IF NOT EXISTS idx_architect_missions_user ON architect_missions(user_id);
   CREATE INDEX IF NOT EXISTS idx_architect_missions_status ON architect_missions(status);
+
+  CREATE TABLE IF NOT EXISTS architect_mutations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connection_id UUID NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sql_executed TEXT NOT NULL,
+    rollback_sql TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'APPLIED' CHECK (status IN ('APPLIED', 'ROLLED_BACK')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_architect_mutations_user ON architect_mutations(user_id);
+  CREATE INDEX IF NOT EXISTS idx_architect_mutations_conn ON architect_mutations(connection_id);
+  CREATE INDEX IF NOT EXISTS idx_architect_mutations_status ON architect_mutations(status);
 `;
 
 pool.query(sql)

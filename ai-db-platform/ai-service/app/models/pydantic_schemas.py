@@ -37,6 +37,13 @@ class ValidationResult(BaseModel):
     error: Optional[str] = None
     sql: Optional[str] = None
 
+class SQLTransformRequest(BaseModel):
+    sql: str
+    dialect: Optional[str] = "postgres"
+
+class SQLTransformResponse(BaseModel):
+    transformed_sql: str
+
 class InsightsRequest(BaseModel):
     query: str
     results: List[Dict[str, Any]]
@@ -84,7 +91,7 @@ class RequirementProbeResponse(BaseModel):
 
 class SchemaMigration(BaseModel):
     sql: str
-    description: str
+    description: Optional[str] = None
     rollback_sql: Optional[str] = None
 
 class EntityField(BaseModel):

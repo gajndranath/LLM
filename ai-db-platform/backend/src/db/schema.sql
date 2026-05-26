@@ -132,10 +132,14 @@ CREATE TABLE IF NOT EXISTS architect_missions (
     status          VARCHAR(20) DEFAULT 'PLANNED' CHECK (status IN ('PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
     ai_reasoning    TEXT,               -- Why the AI thinks this is needed
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Deduplicate per user: the same user cannot have two missions with the
+    -- same title on the same connection regardless of how many audits run.
+    UNIQUE(user_id, connection_id, title)
 );
 
 CREATE INDEX IF NOT EXISTS idx_architect_missions_user ON architect_missions(user_id);
+CREATE INDEX IF NOT EXISTS idx_architect_missions_conn ON architect_missions(connection_id);
 CREATE INDEX IF NOT EXISTS idx_architect_missions_status ON architect_missions(status);
 
 CREATE OR REPLACE TRIGGER trg_missions_updated
@@ -163,3 +167,19 @@ CREATE INDEX IF NOT EXISTS idx_design_studio_created ON design_studio_sessions(c
 CREATE OR REPLACE TRIGGER trg_design_studio_updated
   BEFORE UPDATE ON design_studio_sessions
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ── Schema Mutations (Audit Trail of applied fixes) ──────────
+CREATE TABLE IF NOT EXISTS schema_mutations (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connection_id   UUID NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+    title           VARCHAR(255) NOT NULL,
+    description     TEXT,
+    sql_executed    TEXT NOT NULL,
+    rollback_sql    TEXT,
+    status          VARCHAR(20) DEFAULT 'APPLIED' CHECK (status IN ('APPLIED', 'ROLLED_BACK', 'FAILED')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_schema_mutations_user ON schema_mutations(user_id);
+CREATE INDEX IF NOT EXISTS idx_schema_mutations_conn ON schema_mutations(connection_id);

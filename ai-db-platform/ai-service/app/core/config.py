@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Literal
+from pydantic import model_validator
 
 class Settings(BaseSettings):
     # LLM Provider
@@ -20,8 +21,17 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096  # INCREASED from 2048 to prevent truncation
     
-    # Security
-    AI_SERVICE_SECRET: str = "internal_secret_change_this_xxxxxxxxxxxx"
+    # Security & CORS
+    BACKEND_URL: str = "http://localhost:3001"
+    AI_SERVICE_SECRET: str
+    
+    @model_validator(mode="after")
+    def validate_security(self) -> 'Settings':
+        if not self.AI_SERVICE_SECRET or self.AI_SERVICE_SECRET == "internal_secret_change_this_xxxxxxxxxxxx":
+            raise ValueError(
+                "❌ CRITICAL SECURITY ERROR: AI_SERVICE_SECRET is missing or set to the default developer fallback!"
+            )
+        return self
     
     class Config:
         env_file = ".env"

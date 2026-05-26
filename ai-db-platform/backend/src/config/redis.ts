@@ -3,6 +3,8 @@ import { env } from './env';
 
 let isRedisConnected = false;
 
+export const getRedisStatus = () => isRedisConnected;
+
 export const redisClient = createClient({ 
   url: env.REDIS_URL,
   socket: {

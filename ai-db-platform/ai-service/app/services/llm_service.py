@@ -1,3 +1,6 @@
+import re
+import json
+import logging
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from app.core.llm_factory import LLMFactory
@@ -10,7 +13,6 @@ from app.models.pydantic_schemas import (
     SchemaGenerationResponse,
     SeniorAuditResponse,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,71 @@ class LLMService:
         self.model_name = settings.LLM_MODEL  # FIX: was self.model (undefined attr)
         self.sql_parser = JsonOutputParser(pydantic_object=SQLGenerationOutput)
         self.opt_parser = JsonOutputParser(pydantic_object=OptimizationResponse)
+
+    def _parse_and_repair_json(self, content: str, parser: JsonOutputParser, pydantic_object) -> dict:
+        """
+        Attempts standard parsing. On failure:
+        1. Extracts JSON block via regex and parses.
+        2. If regex fails or json is still malformed, calls a second-pass LLM repair prompt.
+        """
+        # 1. Try standard parser
+        try:
+            return parser.parse(content)
+        except Exception as standard_err:
+            logger.warning(f"[JSON Parse] Standard parser failed: {standard_err}. Trying regex extraction...")
+
+        # 2. Extract JSON block via regex
+        json_regex = r"\{[\s\S]*\}"
+        match = re.search(json_regex, content)
+        if match:
+            json_str = match.group(0)
+            try:
+                return parser.parse(json_str)
+            except Exception as regex_err:
+                logger.warning(f"[JSON Parse] Regex extracted JSON parsing failed: {regex_err}. Triggering LLM repair...")
+
+        # 3. Call a second-pass LLM repair prompt
+        logger.info("[JSON Parse] Calling second-pass LLM repair...")
+        try:
+            schema_info = ""
+            if hasattr(pydantic_object, 'model_json_schema'):
+                schema_info = str(pydantic_object.model_json_schema())
+            elif hasattr(pydantic_object, 'schema'):
+                schema_info = str(pydantic_object.schema())
+
+            repair_prompt = f"""You are a JSON recovery assistant.
+You are given a text that was supposed to be a valid JSON matching the following schema.
+SCHEMA: {schema_info}
+
+RAW TEXT TO REPAIR:
+{content}
+
+Instructions:
+1. Fix any syntax errors (missing commas, unescaped quotes, unclosed braces).
+2. Clean up any prefix/suffix conversational text.
+3. Ensure all keys and string values are enclosed in double quotes.
+4. Return ONLY the valid repaired raw JSON object. Do not include markdown code block formatting (e.g. do not wrap in ```json)."""
+
+            messages = [
+                SystemMessage(content="You are a precise JSON syntax repair agent. Return only raw JSON."),
+                HumanMessage(content=repair_prompt)
+            ]
+            response = self.llm.invoke(messages)
+            repaired_content = response.content.strip()
+            
+            # Remove ```json and ``` markdown wrapping if the LLM output it anyway
+            if repaired_content.startswith("```"):
+                lines = repaired_content.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                repaired_content = "\n".join(lines).strip()
+            
+            return parser.parse(repaired_content)
+        except Exception as repair_err:
+            logger.error(f"[JSON Parse] Second-pass LLM repair failed: {repair_err}")
+            raise Exception(f"Failed to parse and repair JSON output: {repair_err}") from repair_err
 
     # ── SQL Generation ─────────────────────────────────────────
     async def generate_sql(self, natural_query: str, schema_context: str) -> SQLGenerationOutput:
@@ -59,7 +126,7 @@ Return ONLY a valid JSON:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = self.sql_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, self.sql_parser, SQLGenerationOutput)
             return SQLGenerationOutput(**result)
         except Exception as e:
             logger.error(f"LLM SQL Generation Error: {str(e)}")
@@ -95,7 +162,7 @@ Return ONLY raw JSON:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = self.opt_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, self.opt_parser, OptimizationResponse)
             return OptimizationResponse(**result)
         except Exception as e:
             logger.error(f"LLM Optimization Error: {str(e)}")
@@ -133,7 +200,7 @@ DIAGRAM RULES:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = ins_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, ins_parser, InsightsResponse)
             return InsightsResponse(**result)
         except Exception as e:
             logger.error(f"LLM Insights Error: {str(e)}")
@@ -191,7 +258,7 @@ CRITICAL DATA TYPE RULES:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = arch_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, arch_parser, ArchitectureReviewResponse)
             return ArchitectureReviewResponse(**result)
         except Exception as e:
             logger.error(f"LLM Architecture Audit Error: {str(e)}")
@@ -233,6 +300,7 @@ CONVERSATION RULES:
    }}
    </ACTION>
 4. Keep the conversation professional, authoritative, and helpful.
+5. IMPORTANT: If the user asks you to "generate the schema", "show the ERD", "write the SQL", or anything similar, DO NOT output raw SQL schemas or text-based ERDs in the chat. Instead, output READY_TO_GENERATE and tell the user: "Please click the 'Generate Blueprint' button on your screen to view the interactive ERD and complete SQL scripts."
 
 Return ONLY your conversational response as plain text (with optional <ACTION> blocks). No other JSON wrapping."""
 
@@ -279,6 +347,8 @@ MASTER DESIGN CHECKLIST (cover ALL relevant points):
 11. LOAD BALANCING: Identify read-heavy tables that benefit from PostgreSQL read replicas.
 12. STORAGE TIERS: Identify hot (recent) vs cold (archived) data patterns.
 
+CRITICAL INSTRUCTION: You MUST include the `erd_mermaid` field with a valid Mermaid ER Diagram string, and the `scalability_notes` field with a detailed paragraph outlining scalability strategies. DO NOT OMIT THEM.
+
 Return ONLY a valid JSON:
 {{
     "entities": [
@@ -317,7 +387,7 @@ Return ONLY a valid JSON:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = schema_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, schema_parser, SchemaGenerationResponse)
             return SchemaGenerationResponse(**result)
         except Exception as e:
             logger.error(f"LLM Schema Generation Error: {str(e)}")
@@ -393,7 +463,7 @@ Return ONLY a valid JSON:
         ]
         try:
             response = self.llm.invoke(messages)
-            result = audit_parser.parse(response.content)
+            result = self._parse_and_repair_json(response.content, audit_parser, SeniorAuditResponse)
             return SeniorAuditResponse(**result)
         except Exception as e:
             logger.error(f"LLM Senior Audit Error: {str(e)}")

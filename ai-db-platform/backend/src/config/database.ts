@@ -5,9 +5,9 @@ import { env } from './env';
 // This handles both local Docker and Cloud (Neon) automatically
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  },
+  ssl: env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: true }
+    : { rejectUnauthorized: false },
   max: 20,
   idleTimeoutMillis: 60000,      // Increase to 60s
   connectionTimeoutMillis: 20000 // Increase to 20s

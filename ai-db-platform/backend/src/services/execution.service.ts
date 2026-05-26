@@ -2,21 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import { env } from '../config/env';
 import { ApiError } from '../utils/ApiError';
 
-export interface ExecutionResult {
-  rows: Record<string, unknown>[];
-  rowCount: number;
-  fields: { name: string; dataTypeID: number }[];
-  executionMs: number;
-  truncated: boolean;
-}
-
-export interface ExplainResult {
-  plan: unknown[];
-  totalCost: number;
-  actualTime: number;
-  hasSeqScan: boolean;
-  warnings: string[];
-}
+import { ExecutionResult, ExplainResult } from '../types/execution.types';
 
 // ── Execute SQL Safely ─────────────────────────────────────
 export const executeQuery = async (
@@ -36,12 +22,15 @@ export const executeQuery = async (
 
     if (readOnly) {
       // Set transaction to read-only for safety
+      await client.query('BEGIN');
       await client.query('SET TRANSACTION READ ONLY');
+    } else {
+      // Start a write transaction for ACID safety
       await client.query('BEGIN');
     }
 
-    // Add LIMIT if not present and it's a SELECT (only for read-only)
-    const safeSql = readOnly ? addLimitIfMissing(sql, env.MAX_QUERY_ROWS) : sql;
+    // Add LIMIT if not present and it's a SELECT (always do this to protect process memory)
+    const safeSql = addLimitIfMissing(sql, env.MAX_QUERY_ROWS);
 
     const result = await client.query({
       text: safeSql,
@@ -51,6 +40,8 @@ export const executeQuery = async (
 
     if (readOnly) {
       await client.query('ROLLBACK'); // Always rollback read-only queries
+    } else {
+      await client.query('COMMIT'); // Commit mutations
     }
 
     const executionMs = Date.now() - startTime;
@@ -59,10 +50,14 @@ export const executeQuery = async (
     const truncated = result.rowCount !== null && result.rowCount >= env.MAX_QUERY_ROWS;
 
     // Convert array rows to objects
-    const fields = result.fields.map((f) => ({ name: f.name, dataTypeID: f.dataTypeID }));
-    const rows = (result.rows as unknown[][]).map((row) =>
-      Object.fromEntries(fields.map((f, i) => [f.name, row[i]]))
-    );
+    const fields = result.fields
+      ? result.fields.map((f) => ({ name: f.name, dataTypeID: f.dataTypeID }))
+      : [];
+    const rows = result.rows && Array.isArray(result.rows)
+      ? (result.rows as unknown[][]).map((row) =>
+          Object.fromEntries(fields.map((f, i) => [f.name, row[i]]))
+        )
+      : [];
 
     return { rows, rowCount: rows.length, fields, executionMs, truncated };
   } catch (error: any) {

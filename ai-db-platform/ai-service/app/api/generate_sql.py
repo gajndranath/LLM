@@ -10,10 +10,13 @@ from app.models.pydantic_schemas import (
     ArchitectureReviewResponse,
     RequirementProbeResponse,
     SchemaGenerationResponse,
-    SeniorAuditResponse
+    SeniorAuditResponse,
+    SQLTransformRequest,
+    SQLTransformResponse,
+    ValidationResult
 )
 from app.services.llm_service import LLMService
-from app.services.sql_validator import validate_sql_safety
+from app.services.sql_validator import validate_sql_safety, transform_sql
 from app.core.config import settings
 
 router = APIRouter()
@@ -175,3 +178,34 @@ async def generate_schema_visuals_endpoint(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/transform-sql", response_model=SQLTransformResponse)
+async def transform_sql_endpoint(
+    request: SQLTransformRequest,
+    _ = Depends(verify_internal_secret)
+):
+    """
+    Transform SQL: add IF NOT EXISTS to DDL, rewrite functions.
+    """
+    try:
+        transformed = transform_sql(request.sql, request.dialect)
+        return SQLTransformResponse(transformed_sql=transformed)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/validate-sql", response_model=ValidationResult)
+async def validate_sql_endpoint(
+    request: SQLTransformRequest,
+    _ = Depends(verify_internal_secret)
+):
+    """
+    Validate SQL safety and syntax.
+    """
+    try:
+        result = validate_sql_safety(request.sql, request.dialect)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
