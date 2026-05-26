@@ -2,6 +2,10 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
 
+if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
+  throw new Error("❌ BUILD ERROR: VITE_API_URL environment variable is required in production mode!");
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 export const api = axios.create({

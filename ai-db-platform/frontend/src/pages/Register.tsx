@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Mail,
@@ -11,7 +11,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { api } from '../api/axiosInstance';
+import { authApi } from '../api/auth.api';
 import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
 
@@ -22,20 +22,10 @@ const Register = () => {
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
-  const [deviceId, setDeviceId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const setAuth = useAuthStore((state) => state.setAuth);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    let storedId = localStorage.getItem('device_id');
-    if (!storedId) {
-      storedId = 'device_' + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('device_id', storedId);
-    }
-    setDeviceId(storedId);
-  }, []);
 
   const handleRequestOTP = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +33,7 @@ const Register = () => {
 
     setLoading(true);
     try {
-      await api.post('/auth/send-otp', { email });
+      await authApi.sendOtp(email);
       toast.success("OTP sent to your email!");
       setStep(2);
     } catch (error: any) {
@@ -59,15 +49,14 @@ const Register = () => {
 
     setLoading(true);
     try {
-      const res = (await api.post('/auth/register', {
+      const res = await authApi.register({
         name,
         email,
         password,
-        otp,
-        deviceId
-      })) as any;
+        otp
+      });
 
-      const { user, accessToken } = res.data.data;
+      const { user, accessToken } = res.data;
       setAuth(user, accessToken);
       toast.success("Registration successful!");
       navigate('/');

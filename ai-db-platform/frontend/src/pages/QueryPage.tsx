@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor from '@monaco-editor/react';
-import { api } from '../api/axiosInstance';
+import { connectionsApi } from '../api/connections.api';
+import { queryApi } from '../api/query.api';
+import { useSchemaExtract } from '../hooks/useSchemaExtract';
 import { useApp } from '../context/AppContext';
 import {
   Terminal,
@@ -18,17 +20,22 @@ import {
   Layers,
   ChevronRight,
   ChevronDown,
-  Info
+  Info,
+  Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ChartRenderer from '../components/ChartRenderer';
 import MermaidChart from '../components/MermaidChart';
+import TableDataInspector from '../components/TableDataInspector';
 
 const QueryPage = () => {
   const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useApp();
   const [naturalQuery, setNaturalQuery] = useState('');
+  const [inspectingTable, setInspectingTable] = useState<string | null>(null);
   const [generatedSql, setGeneratedSql] = useState('');
   const [results, setResults] = useState<any>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [activeTab, setActiveTab] = useState<'editor' | 'history'>('editor');
   const [viewMode, setViewMode] = useState<'table' | 'chart' | 'diagrams'>('table');
@@ -37,6 +44,7 @@ const QueryPage = () => {
   const [expandedTables, setExpandedTables] = useState<string[]>([]);
   const [insights, setInsights] = useState<any>(null);
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+  const [confirmWriteModal, setConfirmWriteModal] = useState<{ show: boolean; sql: string } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -44,64 +52,59 @@ const QueryPage = () => {
   const { data: connections, isLoading } = useQuery({
     queryKey: ['connections'],
     queryFn: async () => {
-      const { data } = await api.get('/connections');
-      return data.data || []; // Ensure it's always an array
+      const res = await connectionsApi.getConnections();
+      return res.data || [];
     }
   });
 
   // Fetch schema for the selected connection
-  const { data: schema, isLoading: schemaLoading } = useQuery({
-    queryKey: ['schema', selectedConn],
-    queryFn: async () => {
-      if (!selectedConn) return null;
-      const { data } = await api.get(`/connections/${selectedConn}/schema`);
-      return data.data;
-    },
-    enabled: !!selectedConn
-  });
+  const { data: schema, isLoading: schemaLoading } = useSchemaExtract(selectedConn);
 
   // Fetch History
   const { data: history } = useQuery({
     queryKey: ['history', selectedConn],
     queryFn: async () => {
-      const { data } = await api.get(`/query/history${selectedConn ? `?connectionId=${selectedConn}` : ''}`);
-      return data.data;
+      const res = await queryApi.getHistory(selectedConn || undefined);
+      return res.data || [];
     }
   });
 
   // 1. Generate SQL Mutation
   const generateMutation = useMutation({
-    mutationFn: (data: any) => api.post('/query/generate', data),
+    mutationFn: (data: any) => queryApi.generateQuery(data),
     onSuccess: (res) => {
-      setGeneratedSql(res.data.data.sql);
-      setChartRec(res.data.data.chart_recommendation);
+      setGeneratedSql(res.data.sql);
+      setChartRec(res.data.chart_recommendation);
       toast.success('SQL Generated successfully');
-      if (res.data.data.warnings?.length > 0) {
-        res.data.data.warnings.forEach((w: string) => toast.warning(w));
-      }
+      res.data.warnings?.forEach((w: string) => toast.warning(w));
     },
-    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to generate SQL')
+    onError: (err: any) => toast.error(err.message || 'Failed to generate SQL')
   });
 
   // 2. Execute SQL Mutation
   const executeMutation = useMutation({
-    mutationFn: (data: any) => api.post('/query/execute', data),
+    mutationFn: (data: any) => queryApi.executeQuery(data),
     onSuccess: async (res) => {
-      const data = res.data.data;
+      const data = res.data;
+      if (data && data.requiresConfirmation) {
+        setConfirmWriteModal({ show: true, sql: generatedSql });
+        return;
+      }
       setResults(data);
-      toast.success(`Query executed: ${data.rowCount} rows returned`);
+      setCurrentPage(1);
+      toast.success(`Query executed: ${data.rowCount || 0} rows returned`);
       queryClient.invalidateQueries({ queryKey: ['history'] });
 
       // Automatically trigger insights if we have data
       if (data.rows && data.rows.length > 0) {
         setIsGeneratingInsights(true);
         try {
-          const insRes = await api.post('/query/insights', {
+          const insRes = await queryApi.getInsights({
             query: naturalQuery,
             results: data.rows.slice(0, 50),
-            connectionId: selectedConn
+            connectionId: selectedConn!
           });
-          setInsights(insRes.data.data);
+          setInsights(insRes.data);
           setViewMode('chart');
         } catch (error) {
           console.error("Insights generation failed", error);
@@ -110,17 +113,17 @@ const QueryPage = () => {
         }
       }
     },
-    onError: (err: any) => toast.error(err.response?.data?.error || 'Query failed')
+    onError: (err: any) => toast.error(err.message || 'Query failed')
   });
 
   // 3. Optimize SQL Mutation
   const optimizeMutation = useMutation({
-    mutationFn: (data: any) => api.post('/query/optimize', data),
+    mutationFn: (data: any) => queryApi.optimizeQuery(data),
     onSuccess: (res) => {
-      setGeneratedSql(res.data.data.optimizedSql);
+      setGeneratedSql(res.data.optimizedSql);
       toast.success('SQL Optimized by AI');
     },
-    onError: (err: any) => toast.error(err.response?.data?.error || 'Optimization failed')
+    onError: (err: any) => toast.error(err.message || 'Optimization failed')
   });
 
   const handleGenerate = (e: React.FormEvent) => {
@@ -141,6 +144,10 @@ const QueryPage = () => {
     if (!generatedSql.trim()) return toast.error('No SQL to optimize');
     optimizeMutation.mutate({ sql: generatedSql, connectionId: selectedConn });
   };
+
+  const totalRows = results?.rows?.length || 0;
+  const totalPages = Math.ceil(totalRows / pageSize);
+  const paginatedRows = results?.rows ? results.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize) : [];
 
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col space-y-6">
@@ -193,16 +200,25 @@ const QueryPage = () => {
                 const isExpanded = expandedTables.includes(table.table_name);
                 return (
                   <div key={`${table.table_name}-${idx}`} className="space-y-1">
-                    <button
-                      onClick={() => setExpandedTables(prev =>
-                        isExpanded ? prev.filter(t => t !== table.table_name) : [...prev, table.table_name]
-                      )}
-                      className="flex items-center space-x-2 text-slate-300 hover:text-white w-full text-left group transition-all"
-                    >
-                      {isExpanded ? <ChevronDown size={14} className="text-blue-400" /> : <ChevronRight size={14} className="text-slate-600" />}
-                      <TableIcon size={14} className="text-blue-400/60" />
-                      <span className="text-sm font-bold truncate">{table.table_name}</span>
-                    </button>
+                    <div className="flex items-center justify-between w-full group/table">
+                      <button
+                        onClick={() => setExpandedTables(prev =>
+                          isExpanded ? prev.filter(t => t !== table.table_name) : [...prev, table.table_name]
+                        )}
+                        className="flex items-center space-x-2 text-slate-300 hover:text-white text-left transition-all truncate flex-1"
+                      >
+                        {isExpanded ? <ChevronDown size={14} className="text-blue-400" /> : <ChevronRight size={14} className="text-slate-600" />}
+                        <TableIcon size={14} className="text-blue-400/60" />
+                        <span className="text-sm font-bold truncate">{table.table_name}</span>
+                      </button>
+                      <button
+                        onClick={() => setInspectingTable(table.table_name)}
+                        className="opacity-0 group-hover/table:opacity-100 transition-all p-1 hover:bg-white/10 text-slate-400 hover:text-blue-400 rounded-lg flex items-center justify-center"
+                        title="Browse Table Records"
+                      >
+                        <Eye size={12} />
+                      </button>
+                    </div>
 
                     {isExpanded && (
                       <div className="ml-6 space-y-3 border-l border-white/5 pl-3 animate-in slide-in-from-top-2 duration-200">
@@ -451,27 +467,93 @@ const QueryPage = () => {
                 <p className="text-xs font-bold">No Data Loaded</p>
               </div>
             ) : viewMode === 'table' ? (
-              <table className="w-full text-left text-xs">
-                <thead className="bg-white/5 sticky top-0">
-                  <tr>
-                    {results.fields.map((f: any) => (
-                      <th key={f.name} className="px-4 py-3 border-b border-white/5 font-bold text-slate-400 uppercase tracking-wider">{f.name}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {results.rows.map((row: any, i: number) => (
-                    <tr key={i} className="hover:bg-white/2 transition-colors">
-                      {results.fields.map((f: any) => (
-                        <td key={f.name} className="px-4 py-3 text-slate-300 truncate max-w-[150px]">{row[f.name]?.toString() || 'null'}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="flex flex-col h-full justify-between">
+                <div className="flex-1 overflow-auto">
+                  {results && results.fields && results.fields.length > 0 ? (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-white/5 sticky top-0 z-10">
+                        <tr>
+                          {results.fields.map((f: any) => (
+                            <th key={f.name} className="px-4 py-3 border-b border-white/5 font-bold text-slate-400 uppercase tracking-wider">{f.name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {paginatedRows.map((row: any, i: number) => (
+                          <tr key={i} className="hover:bg-white/2 transition-colors">
+                            {results.fields.map((f: any) => (
+                              <td key={f.name} className="px-4 py-3 text-slate-300 truncate max-w-[150px]">{row[f.name]?.toString() || 'null'}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center opacity-35 text-center py-20 px-6 space-y-3">
+                      <CheckCircle2 size={32} className="text-emerald-500" />
+                      <p className="text-xs font-bold uppercase tracking-wider">{results?.message || 'Query executed successfully with no records returned'}</p>
+                    </div>
+                  )}
+                </div>
+
+                {totalRows > 0 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-white/5 bg-slate-900/60 backdrop-blur-md text-[11px] select-none">
+                    <div className="flex items-center space-x-2 text-slate-400">
+                      <span>Show</span>
+                      <select
+                        value={pageSize}
+                        onChange={(e) => {
+                          setPageSize(Number(e.target.value));
+                          setCurrentPage(1);
+                        }}
+                        className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white font-bold cursor-pointer focus:outline-none"
+                      >
+                        {[5, 10, 20, 50, 100].map(sz => (
+                          <option key={sz} value={sz} className="bg-slate-900">{sz}</option>
+                        ))}
+                      </select>
+                      <span>rows of {totalRows}</span>
+                    </div>
+
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all font-bold"
+                      >
+                        First
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all font-bold"
+                      >
+                        Prev
+                      </button>
+                      <span className="px-3 py-1.5 text-slate-400 font-medium">
+                        Page <strong className="text-white">{currentPage}</strong> of <strong className="text-white">{totalPages || 1}</strong>
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                        disabled={currentPage === totalPages || totalPages === 0}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all font-bold"
+                      >
+                        Next
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages || totalPages === 0}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all font-bold"
+                      >
+                        Last
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : viewMode === 'chart' ? (
               <div className="h-full p-6 space-y-6">
-                {chartRec && chartRec.type !== 'none' && (
+                {chartRec && chartRec.type !== 'none' && results?.rows && (
                   <>
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider">{chartRec?.label || 'AI Recommended Chart'}</h4>
@@ -481,7 +563,7 @@ const QueryPage = () => {
                     <div className="h-[200px]">
                       <ChartRenderer
                         type={chartRec.type}
-                        data={results.rows}
+                        data={results?.rows || []}
                         xAxis={chartRec.x_axis}
                         yAxis={chartRec.y_axis}
                         label={chartRec.label}
@@ -548,8 +630,49 @@ const QueryPage = () => {
           </div>
         </div>
       </div>
-    </div>
 
+      {inspectingTable && selectedConn && (
+        <TableDataInspector
+          connectionId={selectedConn}
+          tableName={inspectingTable}
+          onClose={() => setInspectingTable(null)}
+        />
+      )}
+
+      {confirmWriteModal?.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="glass w-full max-w-md p-10 rounded-[2.5rem] border border-white/10 shadow-2xl space-y-6 animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center animate-pulse">
+              <ShieldAlert size={32} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-2xl font-bold text-white uppercase tracking-wider">Confirm Write Query</h3>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                This query contains database write or mutation statements (INSERT, UPDATE, DELETE, CREATE, ALTER, etc.). Are you sure you want to execute it?
+              </p>
+            </div>
+            <div className="flex flex-col space-y-3 pt-4">
+              <button
+                onClick={() => {
+                  const sql = confirmWriteModal.sql;
+                  setConfirmWriteModal(null);
+                  executeMutation.mutate({ sql, connectionId: selectedConn, confirmWrite: true });
+                }}
+                className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold text-sm shadow-lg shadow-amber-600/20 transition-all uppercase tracking-wider"
+              >
+                Confirm and Execute
+              </button>
+              <button
+                onClick={() => setConfirmWriteModal(null)}
+                className="w-full py-4 bg-white/5 text-slate-400 hover:text-white rounded-2xl font-bold text-sm transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/axiosInstance';
+import { connectionsApi } from '../api/connections.api';
 import {
   Database,
   Plus,
@@ -19,13 +19,13 @@ const ConnectionsPage = () => {
   const { data: connections, isLoading } = useQuery({
     queryKey: ['connections'],
     queryFn: async () => {
-      const { data } = await api.get('/connections');
-      return data.data; // Mapped to ApiResponse structure
+      const res = await connectionsApi.getConnections();
+      return res.data;
     }
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/connections/${id}`),
+    mutationFn: (id: string) => connectionsApi.deleteConnection(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connections'] });
       toast.success('Connection removed successfully');
@@ -34,12 +34,12 @@ const ConnectionsPage = () => {
   });
 
   const testMutation = useMutation({
-    mutationFn: (id: string) => api.get(`/connections/${id}/test`),
+    mutationFn: (id: string) => connectionsApi.testConnection(id),
     onSuccess: (res) => {
-      if (res.data.success) {
-        toast.success(`Connected! Latency: ${res.data.latencyMs}ms`);
+      if (res.success) {
+        toast.success(`Connected!`);
       } else {
-        toast.error(`Connection Failed: ${res.data.message}`);
+        toast.error(`Connection Failed: ${res.message}`);
       }
       queryClient.invalidateQueries({ queryKey: ['connections'] });
     }
@@ -170,13 +170,13 @@ const ConnectionModal = ({ onClose }: { onClose: () => void }) => {
   });
 
   const mutation = useMutation({
-    mutationFn: (data: any) => api.post('/connections', data),
+    mutationFn: (data: any) => connectionsApi.createConnection(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connections'] });
       toast.success('Connection added!');
       onClose();
     },
-    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to add connection')
+    onError: (err: any) => toast.error(err.message || 'Failed to add connection')
   });
 
   return (

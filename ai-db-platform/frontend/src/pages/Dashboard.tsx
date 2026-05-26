@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/axiosInstance';
+import { connectionsApi } from '../api/connections.api';
+import { queryApi } from '../api/query.api';
+import { missionsApi } from '../api/missions.api';
+import { architectApi } from '../api/architect.api';
 import {
   Database,
   Activity,
@@ -25,16 +28,16 @@ const Dashboard = () => {
   const { data: connData } = useQuery({
     queryKey: ['connections'],
     queryFn: async () => {
-      const { data } = await api.get('/connections');
-      return data.data || [];
+      const res = await connectionsApi.getConnections();
+      return res.data || [];
     }
   });
 
   const { data: historyData } = useQuery({
     queryKey: ['history'],
     queryFn: async () => {
-      const { data } = await api.get('/query/history?limit=5');
-      return data.data || [];
+      const res = await queryApi.getHistory(undefined, 5);
+      return res.data || [];
     }
   });
 
@@ -43,8 +46,8 @@ const Dashboard = () => {
     queryKey: ['missions', selectedConnectionId],
     queryFn: async () => {
       if (!selectedConnectionId) return [];
-      const { data } = await api.get(`/architect/missions/${selectedConnectionId}`);
-      return data.data || [];
+      const res = await missionsApi.getActiveMissions(selectedConnectionId);
+      return res.data || [];
     },
     enabled: !!selectedConnectionId
   });
@@ -52,8 +55,8 @@ const Dashboard = () => {
   const { data: audits } = useQuery({
     queryKey: ['architect-history', selectedConnectionId],
     queryFn: async () => {
-      const { data } = await api.get(`/architect/history${selectedConnectionId ? `?connectionId=${selectedConnectionId}` : ''}`);
-      return data.data || [];
+      const res = await architectApi.getHistory(selectedConnectionId || undefined);
+      return res.data || [];
     },
     enabled: !!selectedConnectionId
   });
@@ -61,8 +64,8 @@ const Dashboard = () => {
   // NEW: ATLAS Proactive Audit (Automated Workspace Analysis)
   const { mutate: runAudit, isPending: isAuditing } = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post('/architect/audit', { connectionId: selectedConnectionId, scale: '1M rows' });
-      return data.data;
+      const res = await architectApi.reviewArchitecture({ connectionId: selectedConnectionId!, scale: '1M rows' });
+      return res.data;
     },
     onSuccess: () => {
       toast.success("ATLAS: Workspace Analysis Complete!");
@@ -79,9 +82,9 @@ const Dashboard = () => {
     }
   }, [selectedConnectionId, audits]);
 
-  const updateMissionStatus = async (id: string, status: string) => {
+  const updateMissionStatus = async (id: string, status: any) => {
     try {
-      await api.patch(`/missions/${id}/status`, { status });
+      await missionsApi.updateMissionStatus(id, status);
       toast.success(`Mission marked as ${status.toLowerCase()}`);
       refetchMissions();
     } catch (error) {

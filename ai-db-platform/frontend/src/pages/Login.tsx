@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Database, 
@@ -10,7 +10,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { api } from '../api/axiosInstance';
+import { authApi } from '../api/auth.api';
 import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
 
@@ -18,27 +18,17 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [deviceId, setDeviceId] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   
   const setAuth = useAuthStore((state) => state.setAuth);
-
-  useEffect(() => {
-    let storedId = localStorage.getItem('device_id');
-    if (!storedId) {
-      storedId = 'device_' + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('device_id', storedId);
-    }
-    setDeviceId(storedId);
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const res = (await api.post('/auth/login', { email, password, deviceId })) as any;
-      const { user, accessToken } = res.data.data;
+      const res = await authApi.login({ email, password });
+      const { user, accessToken } = res.data;
       setAuth(user, accessToken);
       toast.success("Welcome back!");
     } catch (err: any) {

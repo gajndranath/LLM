@@ -1,10 +1,22 @@
 import { useState } from 'react';
-import { CheckCircle2, AlertTriangle, ShieldAlert, Zap, ChevronDown, ChevronRight, Copy } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, ShieldAlert, Zap, Loader2, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import MermaidChart from './MermaidChart';
 
 // ── Blueprint Panel (New DB mode result) ─────────────────────
-export function BlueprintPanel({ schema }: { schema: any }) {
+export function BlueprintPanel({ 
+  schema, 
+  sessionId, 
+  connectionId, 
+  onDeploy, 
+  isDeploying 
+}: { 
+  schema: any; 
+  sessionId?: string; 
+  connectionId?: string | null; 
+  onDeploy?: (payload: { sessionId: string; connectionId: string }) => void;
+  isDeploying?: boolean;
+}) {
   const [activeTab, setActiveTab] = useState<'entities' | 'erd' | 'sql' | 'notes'>('entities');
   const [expandedEntity, setExpandedEntity] = useState<string | null>(null);
 
@@ -85,25 +97,60 @@ export function BlueprintPanel({ schema }: { schema: any }) {
         )}
 
         {/* SQL tab */}
-        {activeTab === 'sql' && schema.sql_scripts?.map((script: any, i: number) => (
-          <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-300">{script.description}</span>
-              <button
-                onClick={() => { navigator.clipboard.writeText(script.sql); toast.success('SQL copied!'); }}
-                className="text-slate-500 hover:text-white transition-colors"
-              >
-                <Copy size={14} />
-              </button>
-            </div>
-            <pre className="text-[10px] text-slate-400 font-mono bg-black/30 p-3 rounded-xl overflow-auto max-h-48 whitespace-pre-wrap">{script.sql}</pre>
+        {activeTab === 'sql' && (
+          <div className="space-y-4">
+            {schema.sql_scripts?.map((script: any, i: number) => (
+              <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">{script.description}</span>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(script.sql); toast.success('SQL copied!'); }}
+                    className="text-slate-500 hover:text-white transition-colors"
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
+                <pre className="text-[10px] text-slate-400 font-mono bg-black/30 p-3 rounded-xl overflow-auto max-h-48 whitespace-pre-wrap">{script.sql}</pre>
+              </div>
+            ))}
+
+            {onDeploy && sessionId && (
+              <div className="pt-2">
+                {!connectionId ? (
+                  <div className="w-full py-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl text-[10px] font-bold text-center uppercase tracking-widest">
+                    ⚠️ Select a Database Connection at the top to Deploy
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (confirm("Are you sure you want to deploy these tables to your live database?")) {
+                        onDeploy({ sessionId, connectionId });
+                      }
+                    }}
+                    disabled={isDeploying}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center space-x-2 shadow-lg shadow-blue-900/50 disabled:opacity-50"
+                  >
+                    {isDeploying ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Zap size={16} />
+                    )}
+                    <span>Deploy to Live Database</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-        ))}
+        )}
 
         {/* Strategy tab */}
         {activeTab === 'notes' && (
           <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
-            <p className="text-sm text-slate-300 leading-relaxed font-medium">{schema.scalability_notes}</p>
+            {schema.scalability_notes ? (
+              <p className="text-sm text-slate-300 leading-relaxed font-medium">{schema.scalability_notes}</p>
+            ) : (
+              <p className="text-slate-500 text-sm text-center py-8">No scalability strategy provided by the architect.</p>
+            )}
           </div>
         )}
       </div>
@@ -111,8 +158,15 @@ export function BlueprintPanel({ schema }: { schema: any }) {
   );
 }
 
-// ── Audit Panel (Existing DB mode result) ────────────────────
-export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fix: any) => void }) {
+export function AuditPanel({ 
+  audit, 
+  onApplyFix, 
+  appliedMutations = [] 
+}: { 
+  audit: any; 
+  onApplyFix?: (fix: any) => void; 
+  appliedMutations?: any[];
+}) {
   const [activeTab, setActiveTab] = useState<'insights' | 'architecture'>('insights');
   const severityColor: Record<string, string> = {
     CRITICAL: 'text-red-400 bg-red-500/10 border-red-500/20',
@@ -121,7 +175,34 @@ export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fi
     LOW: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
   };
 
-  const score = audit.health_score ?? 0;
+  // Normalize legacy and new response structures
+  const score = audit.health_score ?? audit.scalability_score ?? 0;
+  const erd = audit.erd_mermaid ?? audit.suggested_diagram_mermaid;
+  const dfd = audit.dfd_mermaid;
+
+  const issues = audit.issues || (audit.critical_mistakes || []).map((detail: string) => ({
+    title: detail.split(' — ')[0] || 'Architectural Concern',
+    severity: 'HIGH',
+    category: 'Architecture',
+    detail: detail
+  }));
+
+  const improvements = audit.improvements || (audit.suggested_fixes || []).map((fix: any) => ({
+    title: fix.title,
+    priority: 'MEDIUM',
+    category: 'Optimization',
+    detail: fix.explanation || 'Suggested adjustment.',
+    sql: fix.sql,
+    rollback_sql: fix.rollback_sql || fix.rollbackSql
+  }));
+
+  const extraPanels: Record<string, string[]> = {
+    performance_bottlenecks: audit.performance_bottlenecks || [],
+    security_concerns: audit.security_concerns || [],
+    recommendations: audit.recommendations || (audit.component_analysis || []).map(
+      (comp: any) => `${comp.component} (${comp.status}): ${comp.notes}`
+    )
+  };
 
   return (
     <div className="space-y-6 overflow-auto h-full pb-4 custom-scrollbar">
@@ -163,13 +244,13 @@ export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fi
           <div className="space-y-3">
              <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-400 ml-1">Entity Relationship Diagram</h4>
              <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
-               {audit.erd_mermaid ? <MermaidChart chart={audit.erd_mermaid} /> : <div className="py-10 text-center text-slate-600 text-xs italic">Diagram not available for this audit</div>}
+                {erd ? <MermaidChart chart={erd} /> : <div className="py-10 text-center text-slate-600 text-xs italic">Diagram not available for this audit</div>}
              </div>
           </div>
           <div className="space-y-3">
              <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-400 ml-1">Logical Data Flow</h4>
              <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
-               {audit.dfd_mermaid ? <MermaidChart chart={audit.dfd_mermaid} /> : <div className="py-10 text-center text-slate-600 text-xs italic">Data flow not available for this audit</div>}
+                {dfd ? <MermaidChart chart={dfd} /> : <div className="py-10 text-center text-slate-600 text-xs italic">Data flow not available for this audit</div>}
              </div>
           </div>
         </div>
@@ -177,12 +258,12 @@ export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fi
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
 
       {/* Issues */}
-      {audit.issues?.length > 0 && (
+      {issues.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-xs font-bold uppercase tracking-widest text-red-400 flex items-center space-x-2">
-            <ShieldAlert size={14} /><span>Issues Found ({audit.issues.length})</span>
+            <ShieldAlert size={14} /><span>Issues Found ({issues.length})</span>
           </h4>
-          {audit.issues.map((issue: any, i: number) => (
+          {issues.map((issue: any, i: number) => (
             <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-white">{issue.title}</span>
@@ -199,43 +280,55 @@ export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fi
       )}
 
       {/* Improvements */}
-      {audit.improvements?.length > 0 && (
+      {improvements.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-400 flex items-center space-x-2">
-            <Zap size={14} /><span>Improvements ({audit.improvements.length})</span>
+            <Zap size={14} /><span>Improvements ({improvements.length})</span>
           </h4>
-          {audit.improvements.map((imp: any, i: number) => (
-            <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2 group">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-white">{imp.title}</span>
-                <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${severityColor[imp.priority] || severityColor.MEDIUM}`}>{imp.priority}</span>
-              </div>
-              <span className="text-[9px] bg-white/5 text-slate-500 px-2 py-0.5 rounded uppercase font-bold">{imp.category}</span>
-              <p className="text-[11px] text-slate-400 leading-relaxed">{imp.detail}</p>
-              {imp.sql && (
-                <div className="space-y-2">
-                  <div className="relative">
-                    <pre className="text-[10px] text-slate-400 font-mono bg-black/30 p-3 rounded-xl overflow-auto max-h-32 whitespace-pre-wrap">{imp.sql}</pre>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(imp.sql); toast.success('SQL copied!'); }}
-                      className="absolute top-2 right-2 text-slate-500 hover:text-white"
-                    >
-                      <Copy size={12} />
-                    </button>
-                  </div>
-                  {onApplyFix && (
-                    <button
-                      onClick={() => onApplyFix(imp)}
-                      className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center space-x-2 active:scale-95"
-                    >
-                      <Zap size={12} />
-                      <span>Apply Fix via ATLAS</span>
-                    </button>
-                  )}
+          {improvements.map((imp: any, i: number) => {
+            const isApplied = appliedMutations.some(
+              (m: any) => m.title.trim().toLowerCase() === imp.title.trim().toLowerCase() && m.status === 'APPLIED'
+            );
+            return (
+              <div key={i} className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2 group">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-white">{imp.title}</span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${severityColor[imp.priority] || severityColor.MEDIUM}`}>{imp.priority}</span>
                 </div>
-              )}
-            </div>
-          ))}
+                <span className="text-[9px] bg-white/5 text-slate-500 px-2 py-0.5 rounded uppercase font-bold">{imp.category}</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">{imp.detail}</p>
+                {imp.sql && (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <pre className="text-[10px] text-slate-400 font-mono bg-black/30 p-3 rounded-xl overflow-auto max-h-32 whitespace-pre-wrap">{imp.sql}</pre>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(imp.sql); toast.success('SQL copied!'); }}
+                        className="absolute top-2 right-2 text-slate-500 hover:text-white"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                    {isApplied ? (
+                      <div className="w-full py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center space-x-2">
+                        <CheckCircle2 size={12} />
+                        <span>Applied & Secured</span>
+                      </div>
+                    ) : (
+                      onApplyFix && (
+                        <button
+                          onClick={() => onApplyFix(imp)}
+                          className="w-full py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center justify-center space-x-2 active:scale-95"
+                        >
+                          <Zap size={12} />
+                          <span>Apply Fix via ATLAS</span>
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -245,13 +338,13 @@ export function AuditPanel({ audit, onApplyFix }: { audit: any; onApplyFix?: (fi
         { key: 'security_concerns', label: 'Security Concerns', icon: ShieldAlert, color: 'text-red-400' },
         { key: 'recommendations', label: 'Recommendations', icon: CheckCircle2, color: 'text-blue-400' },
       ].map(({ key, label, icon: Icon, color }) => (
-        audit[key]?.length > 0 && (
+        extraPanels[key]?.length > 0 && (
           <div key={key} className="space-y-2">
             <h4 className={`text-xs font-bold uppercase tracking-widest ${color} flex items-center space-x-2`}>
               <Icon size={14} /><span>{label}</span>
             </h4>
             <div className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-2">
-              {audit[key].map((item: string, i: number) => (
+              {extraPanels[key].map((item: string, i: number) => (
                 <div key={i} className="flex items-start space-x-2 text-[11px] text-slate-400">
                   <div className="w-1 h-1 rounded-full bg-slate-600 mt-1.5 flex-shrink-0" />
                   <span>{item}</span>
