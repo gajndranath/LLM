@@ -25,7 +25,7 @@ This is a premium React application built with a focus on "Rich Aesthetics" and 
 ## 📡 Frontend-to-Backend Integration
 
 All API calls are centralized in `/src/api/axiosInstance.ts` with the following patterns:
-- **Base URL**: Managed via `VITE_API_BASE_URL` (Default: `http://localhost:3001/api`).
+- **Base URL**: Managed via `VITE_API_URL` (Default: `http://localhost:3001/api`).
 - **Auth**: JWT is stored in `localStorage` and managed by the `authStore` (Zustand). It is automatically attached to headers via an Axios interceptor.
 - **Real-time**: Socket.IO (implied/planned) for long-running AI audits.
 
@@ -52,7 +52,7 @@ All API calls are centralized in `/src/api/axiosInstance.ts` with the following 
 npm install
 
 # .env
-VITE_API_BASE_URL=http://localhost:3001/api
+VITE_API_URL=http://localhost:3001/api
 
 # Run
 npm run dev
