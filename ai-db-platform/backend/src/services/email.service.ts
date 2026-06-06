@@ -1,8 +1,10 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { env } from '../config/env';
 
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 /**
- * Standard Email Service for sending OTPs and Notifications
+ * Standard Email Service for sending OTPs and Notifications via Resend
  */
 export const sendEmail = async (options: {
   to: string;
@@ -11,33 +13,23 @@ export const sendEmail = async (options: {
   html?: string;
   otp?: string;
 }) => {
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '465'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-    // Force IPv4 resolution to prevent ENETUNREACH on environments without IPv6 support
-    family: 4,
-  } as any);
-
-  const mailOptions = {
-    from: process.env.SMTP_FROM || '"AI DB Platform" <noreply@aidb.com>',
-    to: options.to,
-    subject: options.subject,
-    text: options.text,
-    html: options.html,
-  };
-
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log('📧 Email sent successfully:', info.messageId);
-    return info;
+    const { data, error } = await resend.emails.send({
+      from: process.env.RESEND_FROM || 'AI DB Platform <onboarding@resend.dev>',
+      to: options.to,
+      subject: options.subject,
+      ...(options.html ? { html: options.html } : { text: options.text || '' }),
+    } as any);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    console.log('📧 Email sent successfully:', data?.id);
+    return data;
   } catch (error) {
     console.error('❌ Failed to send email:', error);
-    
+
     if (options.otp && env.NODE_ENV !== 'production') {
       console.warn(`
 ┌────────────────────────────────────────────────────────┐
@@ -52,7 +44,7 @@ export const sendEmail = async (options: {
       `);
     }
 
-    // Don't throw if we want the app to keep running during dev without SMTP
+    // Only throw in production so dev can continue without email
     if (env.NODE_ENV === 'production') throw error;
   }
 };
