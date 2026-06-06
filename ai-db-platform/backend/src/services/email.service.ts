@@ -19,7 +19,9 @@ export const sendEmail = async (options: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-  });
+    // Force IPv4 resolution to prevent ENETUNREACH on environments without IPv6 support
+    family: 4,
+  } as any);
 
   const mailOptions = {
     from: process.env.SMTP_FROM || '"AI DB Platform" <noreply@aidb.com>',
