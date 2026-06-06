@@ -119,7 +119,7 @@ export const getConnectionPool = async (
       : false,
   });
 
-  pool.on('error', (err) => {
+  pool.on('error', (err: Error) => {
     console.error(`Pool error for connection ${connectionId}:`, err.message);
     poolCache.delete(connectionId);
     poolLastAccess.delete(connectionId);

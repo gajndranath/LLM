@@ -13,7 +13,7 @@ export const pool = new Pool({
   connectionTimeoutMillis: 20000 // Increase to 20s
 });
 
-pool.on('error', (err) => {
+pool.on('error', (err: Error) => {
   console.error('❌ PostgreSQL pool error:', err.message);
 });
 

@@ -51,11 +51,11 @@ export const executeQuery = async (
 
     // Convert array rows to objects
     const fields = result.fields
-      ? result.fields.map((f) => ({ name: f.name, dataTypeID: f.dataTypeID }))
+      ? result.fields.map((f: any) => ({ name: f.name, dataTypeID: f.dataTypeID }))
       : [];
     const rows = result.rows && Array.isArray(result.rows)
-      ? (result.rows as unknown[][]).map((row) =>
-          Object.fromEntries(fields.map((f, i) => [f.name, row[i]]))
+      ? (result.rows as unknown[][]).map((row: any[]) =>
+          Object.fromEntries(fields.map((f: any, i: number) => [f.name, row[i]]))
         )
       : [];
 
