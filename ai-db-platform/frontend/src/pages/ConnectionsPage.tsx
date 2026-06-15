@@ -5,15 +5,16 @@ import {
   Database,
   Plus,
   Trash2,
-  CheckCircle,
   Loader2,
   RefreshCw,
-  Search
+  Search,
+  Edit2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const ConnectionsPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { data: connections, isLoading } = useQuery({
@@ -53,7 +54,7 @@ const ConnectionsPage = () => {
           <p className="text-slate-400 mt-2 font-medium">Manage your enterprise database sources</p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => { setEditingConnection(null); setIsModalOpen(true); }}
           className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center space-x-3 transition-all shadow-xl shadow-blue-600/20 active:scale-95"
         >
           <Plus size={20} />
@@ -87,6 +88,13 @@ const ConnectionsPage = () => {
                   title="Test Connection"
                 >
                   {testMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                </button>
+                <button
+                  onClick={() => { setEditingConnection(conn); setIsModalOpen(true); }}
+                  className="p-2.5 rounded-xl bg-white/5 hover:bg-blue-500/20 text-slate-400 hover:text-blue-400 transition-all border border-transparent hover:border-blue-500/20"
+                  title="Edit Connection"
+                >
+                  <Edit2 size={16} />
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(conn.id)}
@@ -139,7 +147,7 @@ const ConnectionsPage = () => {
           ))}
 
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { setEditingConnection(null); setIsModalOpen(true); }}
             className="rounded-[2rem] border-2 border-dashed border-white/10 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all flex flex-col items-center justify-center py-16 group"
           >
             <div className="p-4 rounded-full bg-white/5 group-hover:bg-blue-500/10 group-hover:scale-110 transition-all mb-4 text-slate-600 group-hover:text-blue-400">
@@ -151,40 +159,45 @@ const ConnectionsPage = () => {
       )}
 
       {/* Modal would go here - for now I'll create a simple placeholder form or modal component */}
-      {isModalOpen && <ConnectionModal onClose={() => setIsModalOpen(false)} />}
+      {isModalOpen && <ConnectionModal onClose={() => setIsModalOpen(false)} initialData={editingConnection} />}
     </div>
   );
 };
 
 // Simplified Modal Component
-const ConnectionModal = ({ onClose }: { onClose: () => void }) => {
+const ConnectionModal = ({ onClose, initialData }: { onClose: () => void, initialData?: any }) => {
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
-    name: '',
-    host: '',
-    port: 5432,
-    databaseName: '',
-    username: '',
-    password: '',
-    sslEnabled: false
+    name: initialData?.name || '',
+    host: initialData?.host || '',
+    port: initialData?.port || 5432,
+    databaseName: initialData?.database_name || '',
+    username: initialData?.username || '',
+    password: '', // Blank for security, unless updating
+    sslEnabled: initialData ? initialData.ssl_enabled : false
   });
 
   const mutation = useMutation({
-    mutationFn: (data: any) => connectionsApi.createConnection(data),
+    mutationFn: (data: any) => {
+      if (initialData) {
+        return connectionsApi.updateConnection(initialData.id, data);
+      }
+      return connectionsApi.createConnection(data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connections'] });
-      toast.success('Connection added!');
+      toast.success(initialData ? 'Connection updated!' : 'Connection added!');
       onClose();
     },
-    onError: (err: any) => toast.error(err.message || 'Failed to add connection')
+    onError: (err: any) => toast.error(err.message || 'Failed to process connection')
   });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={onClose} />
       <div className="glass w-full max-w-2xl rounded-[3rem] p-12 relative z-10 animate-in zoom-in-95 duration-200">
-        <h3 className="text-2xl font-bold mb-2">Configure Data Source</h3>
-        <p className="text-slate-400 mb-8 font-medium">Connect your PostgreSQL enterprise database</p>
+        <h3 className="text-2xl font-bold mb-2">{initialData ? 'Edit Data Source' : 'Configure Data Source'}</h3>
+        <p className="text-slate-400 mb-8 font-medium">{initialData ? 'Update your database connection details' : 'Connect your PostgreSQL enterprise database'}</p>
 
         <form onSubmit={(e) => { e.preventDefault(); mutation.mutate(formData); }} className="grid grid-cols-2 gap-6">
           <div className="col-span-2 space-y-2">
@@ -238,12 +251,14 @@ const ConnectionModal = ({ onClose }: { onClose: () => void }) => {
             />
           </div>
           <div className="col-span-2 space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 ml-1">Password</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 ml-1">
+              {initialData ? 'Password (leave blank to keep current)' : 'Password'}
+            </label>
             <input
               type="password"
-              required
+              required={!initialData}
               className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              placeholder="••••••••"
+              placeholder={initialData ? "••••••••" : "••••••••"}
               value={formData.password}
               onChange={e => setFormData({ ...formData, password: e.target.value })}
             />
@@ -269,7 +284,7 @@ const ConnectionModal = ({ onClose }: { onClose: () => void }) => {
               disabled={mutation.isPending}
               className="bg-blue-600 hover:bg-blue-500 text-white px-10 py-4 rounded-2xl font-bold transition-all shadow-xl shadow-blue-600/20 active:scale-95 disabled:opacity-50 flex items-center space-x-2"
             >
-              {mutation.isPending ? <Loader2 className="animate-spin" /> : <span>Connect Database</span>}
+              {mutation.isPending ? <Loader2 className="animate-spin" /> : <span>{initialData ? 'Update Connection' : 'Connect Database'}</span>}
             </button>
           </div>
         </form>

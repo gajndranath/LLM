@@ -7,6 +7,7 @@ import {
   deleteConnection,
   testConnection,
   getConnectionPool,
+  updateConnection,
 } from '../services/connection.service';
 import { extractSchema } from '../services/schema.service';
 import { validateRequest } from '../middleware/validation.middleware';
@@ -75,6 +76,25 @@ router.get('/:id/schema', asyncHandler(async (req: Request, res: Response) => {
     new ApiResponse(200, schema, "Schema extracted successfully")
   );
 }));
+
+// PUT /api/connections/:id
+router.put(
+  '/:id',
+  validateRequest(connectionSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { name, host, port, databaseName, username, password, sslEnabled } = req.body;
+    
+    const connection = await updateConnection(req.params.id, req.user!.userId, {
+      name, host, port, databaseName, username, password, sslEnabled,
+    });
+    
+    console.log(`[AUDIT] User ${req.user!.userId} updated db_connection ${connection.id} (${connection.name})`);
+
+    return res.status(200).json(
+      new ApiResponse(200, connection, "Connection updated successfully")
+    );
+  })
+);
 
 // DELETE /api/connections/:id
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {

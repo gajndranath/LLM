@@ -192,6 +192,45 @@ export const testConnection = async (
   }
 };
 
+// ── Update Connection ────────────────────────────────────────
+export const updateConnection = async (
+  connectionId: string,
+  userId: string,
+  input: Partial<ConnectionInput>
+): Promise<ConnectionRow> => {
+  const conn = await getConnectionRow(connectionId, userId);
+
+  const name = input.name ?? conn.name;
+  const host = input.host ?? conn.host;
+  const port = input.port ?? conn.port;
+  const databaseName = input.databaseName ?? conn.database_name;
+  const username = input.username ?? conn.username;
+  const sslEnabled = input.sslEnabled ?? conn.ssl_enabled;
+  
+  let passwordEnc = conn.password_enc;
+  if (input.password && input.password.trim() !== '') {
+    passwordEnc = encrypt(input.password);
+  }
+
+  const result = await query(
+    `UPDATE db_connections
+     SET name = $1, host = $2, port = $3, database_name = $4, username = $5, password_enc = $6, ssl_enabled = $7, updated_at = NOW()
+     WHERE id = $8 AND user_id = $9
+     RETURNING id, user_id, name, host, port, database_name, username,
+               ssl_enabled, is_active, last_tested_at, last_test_ok, created_at`,
+    [name, host, port, databaseName, username, passwordEnc, sslEnabled, connectionId, userId]
+  );
+
+  // Evict the updated connection from pool cache so it recreates with new credentials
+  const pool = poolCache.get(connectionId);
+  if (pool) {
+    await pool.end();
+    poolCache.delete(connectionId);
+  }
+
+  return result.rows[0];
+};
+
 // ── Private helpers ────────────────────────────────────────
 const getConnectionRow = async (connectionId: string, userId: string) => {
   const result = await query(

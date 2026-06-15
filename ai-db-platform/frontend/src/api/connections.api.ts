@@ -26,4 +26,9 @@ export const connectionsApi = {
     const { data } = await api.post('/connections', payload);
     return data;
   },
+
+  updateConnection: async (id: string, payload: any): Promise<ApiResponse<DbConnection>> => {
+    const { data } = await api.put(`/connections/${id}`, payload);
+    return data;
+  },
 };
