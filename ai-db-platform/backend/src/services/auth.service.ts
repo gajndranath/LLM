@@ -3,13 +3,14 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { dbQuery as query } from '../config/database';
 import { env } from '../config/env';
-import { JwtPayload, UserRole, RegisterInput, LoginInput, AuthResult } from '../types/auth.types';
+import { JwtPayload, UserRole, RegisterInput, RegisterOrgInput, LoginInput, AuthResult } from '../types/auth.types';
 import { ApiError } from '../utils/ApiError';
 import { validateEmail, validatePassword } from '../utils/validators';
 import { sendEmail, sendOTPEmail } from './email.service';
 import { redisClient, getRedisStatus } from '../config/redis';
 
 const SALT_ROUNDS = 12;
+
 
 
 /**
@@ -129,8 +130,11 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
   const { email, password } = input;
 
   const result = await query(
-    `SELECT id, name, email, role, password_hash, is_active, device_id
-     FROM users WHERE email = $1`,
+    `SELECT u.id, u.name, u.email, u.role, u.password_hash, u.is_active, u.device_id,
+            u.organization_id AS "organizationId", o.name AS "organizationName"
+     FROM users u
+     LEFT JOIN organizations o ON o.id = u.organization_id
+     WHERE u.email = $1`,
     [email.toLowerCase()]
   );
 
@@ -278,7 +282,10 @@ export const refreshAccessToken = async (refreshToken: string): Promise<string> 
 
     // Get user
     const userResult = await query(
-      'SELECT id, email, role FROM users WHERE id = $1 AND is_active = true',
+      `SELECT u.id, u.email, u.role, u.organization_id AS "organizationId", o.name AS "organizationName"
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.organization_id
+       WHERE u.id = $1 AND u.is_active = true`,
       [decoded.userId]
     );
 
@@ -301,7 +308,11 @@ export const logout = async (refreshToken: string): Promise<void> => {
 // ── Get Current User ──────────────────────────────────────
 export const getMe = async (userId: string) => {
   const result = await query(
-    'SELECT id, name, email, role, created_at, last_login_at FROM users WHERE id = $1',
+    `SELECT u.id, u.name, u.email, u.role, u.created_at, u.last_login_at,
+            u.organization_id AS "organizationId", o.name AS "organizationName"
+     FROM users u
+     LEFT JOIN organizations o ON o.id = u.organization_id
+     WHERE u.id = $1`,
     [userId]
   );
   if (result.rows.length === 0) throw new ApiError(404, 'User not found');
@@ -309,9 +320,9 @@ export const getMe = async (userId: string) => {
 };
 
 // ── Helpers ───────────────────────────────────────────────
-const generateAccessToken = (user: { id: string; email: string; role: UserRole }): string => {
+const generateAccessToken = (user: { id: string; email: string; role: UserRole; organizationId?: string; organizationName?: string }): string => {
   return jwt.sign(
-    { userId: user.id, email: user.email, role: user.role } as JwtPayload,
+    { userId: user.id, email: user.email, role: user.role, organizationId: user.organizationId, organizationName: user.organizationName } as JwtPayload,
     env.JWT_SECRET,
     { expiresIn: env.JWT_EXPIRES_IN } as jwt.SignOptions
   );
@@ -335,13 +346,20 @@ const generateRefreshToken = async (userId: string): Promise<string> => {
 };
 
 const generateAuthResult = async (user: {
-  id: string; name: string; email: string; role: UserRole;
+  id: string; name: string; email: string; role: UserRole; organizationId?: string; organizationName?: string;
 }): Promise<AuthResult> => {
   const accessToken = generateAccessToken(user);
   const refreshToken = await generateRefreshToken(user.id);
 
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId,
+      organizationName: user.organizationName,
+    },
     accessToken,
     refreshToken,
   };
@@ -350,3 +368,110 @@ const generateAuthResult = async (user: {
 const hashToken = (token: string): string => {
   return crypto.createHash('sha256').update(token).digest('hex');
 };
+
+// ── Register Organization (Admin self-registration) ────────
+export const registerOrg = async (input: RegisterOrgInput): Promise<AuthResult> => {
+  const { companyName, adminName, email, password, plan, otp } = input;
+
+  // 1. Validate inputs
+  if (!companyName || companyName.trim().length < 2) {
+    throw new ApiError(400, 'Company name must be at least 2 characters');
+  }
+  if (!adminName || adminName.trim().length < 2) {
+    throw new ApiError(400, 'Admin name must be at least 2 characters');
+  }
+  if (!validatePassword(password)) {
+    throw new ApiError(400, 'Password is too weak');
+  }
+
+  // 2. Verify OTP
+  let isValid = false;
+  if (getRedisStatus()) {
+    try {
+      const storedOtp = await redisClient.get(`otp:${email}`);
+      if (storedOtp === otp) isValid = true;
+    } catch {}
+  }
+  if (!isValid) {
+    const r = await query(
+      'SELECT id FROM verification_otps WHERE email = $1 AND otp = $2 AND expires_at > NOW()',
+      [email.toLowerCase(), otp]
+    );
+    if (r.rows.length > 0) isValid = true;
+  }
+  if (!isValid) throw new ApiError(400, 'Invalid or expired OTP');
+
+  // 3. Check duplicate email
+  const emailCheck = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+  if (emailCheck.rows.length > 0) {
+    throw new ApiError(409, 'An account with this email already exists');
+  }
+
+  // 4. Generate slug from company name
+  const baseSlug = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  // Ensure uniqueness by appending a short random suffix if needed
+  const randomSuffix = crypto.randomBytes(3).toString('hex');
+  const slug = `${baseSlug}-${randomSuffix}`;
+
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+  // 5. Create organization + admin user in a transaction
+  const client = await (await import('../config/database')).pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Create organization
+    const orgResult = await client.query(
+      `INSERT INTO organizations (name, slug, plan, owner_id)
+       VALUES ($1, $2, $3, NULL)
+       RETURNING id, name, slug, plan`,
+      [companyName.trim(), slug, plan]
+    );
+    const org = orgResult.rows[0];
+
+    // Create admin user linked to this org
+    const userResult = await client.query(
+      `INSERT INTO users (name, email, password_hash, role, organization_id)
+       VALUES ($1, $2, $3, 'ADMIN', $4)
+       RETURNING id, name, email, role, organization_id`,
+      [adminName.trim(), email.toLowerCase(), passwordHash, org.id]
+    );
+    const user = userResult.rows[0];
+
+    // Set owner_id on org now that user exists
+    await client.query('UPDATE organizations SET owner_id = $1 WHERE id = $2', [user.id, org.id]);
+
+    // Initial plan subscription record
+    await client.query(
+      `INSERT INTO plan_subscriptions (organization_id, plan, payment_provider, status)
+       VALUES ($1, $2, 'manual', 'active')`,
+      [org.id, plan]
+    );
+
+    await client.query('COMMIT');
+
+    // Cleanup OTP
+    if (getRedisStatus()) {
+      try { await redisClient.del(`otp:${email}`); } catch {}
+    }
+    await query('DELETE FROM verification_otps WHERE email = $1', [email.toLowerCase()]);
+
+    console.log(`[AUDIT] Organization registered: ${org.id} (${org.name}) plan=${plan}. Admin: ${user.id} (${user.email})`);
+
+    return generateAuthResult({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: 'ADMIN',
+      organizationId: org.id,
+      organizationName: org.name,
+    });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, `Registration failed: ${err.message}`);
+  } finally {
+    client.release();
+  }
+};
+

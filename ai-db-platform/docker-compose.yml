@@ -37,7 +37,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: aidb_backend
-    env_file: .env
+    env_file: ./backend/.env
     environment:
       - NODE_ENV=development
       - POSTGRES_HOST=postgres
@@ -59,7 +59,7 @@ services:
       context: ./ai-service
       dockerfile: Dockerfile.dev
     container_name: aidb_ai_service
-    env_file: .env
+    env_file: ./ai-service/.env
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_URL=redis://redis:6379

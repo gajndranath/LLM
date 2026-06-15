@@ -18,12 +18,12 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useApp } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import { toast } from 'sonner';
 
 const Dashboard = () => {
   const queryClient = useQueryClient();
-  const { selectedConnectionId } = useApp();
+  const { selectedConnectionId } = useAppContext();
 
   const { data: connData } = useQuery({
     queryKey: ['connections'],
@@ -87,7 +87,7 @@ const Dashboard = () => {
       await missionsApi.updateMissionStatus(id, status);
       toast.success(`Mission marked as ${status.toLowerCase()}`);
       refetchMissions();
-    } catch (error) {
+    } catch {
       toast.error("Failed to update mission");
     }
   };

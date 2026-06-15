@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import crypto from 'crypto';
+import cookieParser from 'cookie-parser';
 
 // Core config
 import { env } from './config/env';
@@ -20,6 +21,8 @@ import architectRoutes from './routes/architect.routes';
 import missionRoutes from './routes/mission.routes';
 import designStudioRoutes from './routes/design-studio.routes';
 import tableInspectorRoutes from './routes/table-inspector.routes';
+import adminRoutes from './routes/admin.routes';
+import superAdminRoutes from './routes/super-admin.routes';
 
 const app = express();
 
@@ -61,6 +64,7 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // ── API Health Endpoint ──────────────────────────────────────
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -100,13 +104,18 @@ app.get('/api/health', async (req: Request, res: Response) => {
 });
 
 // ── Application Routes ───────────────────────────────────────
+import billingRoutes from './routes/billing.routes';
+
 app.use('/api/auth', authRoutes);
+app.use('/api/billing', billingRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/connections', tableInspectorRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/architect', architectRoutes);
 app.use('/api/missions', missionRoutes);
 app.use('/api/design-studio', designStudioRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/super-admin', superAdminRoutes);
 
 // ── 404 Route Handler ────────────────────────────────────────
 app.use((req: Request, res: Response) => {

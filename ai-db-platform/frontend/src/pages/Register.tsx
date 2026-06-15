@@ -56,10 +56,10 @@ const Register = () => {
         otp
       });
 
-      const { user, accessToken } = res.data;
-      setAuth(user, accessToken);
+      const { user } = res.data;
+      setAuth(user);
       toast.success("Registration successful!");
-      navigate('/');
+      navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.message || "Registration failed");
     } finally {

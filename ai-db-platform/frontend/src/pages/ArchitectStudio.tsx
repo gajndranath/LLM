@@ -4,7 +4,7 @@ import { connectionsApi } from '../api/connections.api';
 import { architectApi } from '../api/architect.api';
 import { designStudioApi } from '../api/designStudio.api';
 import { useSchemaExtract } from '../hooks/useSchemaExtract';
-import { useApp } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import { Sparkles, Database, Loader2, Plus, Wand2, History, MessageSquare, ShieldAlert, Eye, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import DesignStudioChat from '../components/DesignStudioChat';
@@ -15,7 +15,7 @@ type Mode = 'new' | 'existing';
 interface Message { role: 'user' | 'atlas'; content: string; };
 
 export default function ArchitectStudio() {
-  const { selectedConnectionId, setSelectedConnectionId } = useApp();
+  const { selectedConnectionId, setSelectedConnectionId } = useAppContext();
   const queryClient = useQueryClient();
 
   const [mode, setMode] = useState<Mode>('new');

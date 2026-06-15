@@ -1,33 +1,36 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+// No longer using persist
 
-interface User {
+export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'ANALYST' | 'VIEWER' | 'DISPATCHER' | 'DRIVER';
+
+export interface User {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: UserRole;
+  organizationId?: string;
+  organizationName?: string;
 }
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
-  setAuth: (user: User, token: string) => void;
+  isInitialized: boolean;
+  setAuth: (user: User) => void;
   logout: () => void;
+  isSuperAdmin: () => boolean;
+  isAdmin: () => boolean;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      user: null,
-      token: null,
-      isAuthenticated: false,
-      setAuth: (user, token) => set({ user, token, isAuthenticated: true }),
-      logout: () => set({ user: null, token: null, isAuthenticated: false }),
-    }),
-    {
-      name: 'auth-storage',
-      storage: createJSONStorage(() => sessionStorage),
-    }
-  )
-);
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: null,
+  isAuthenticated: false,
+  isInitialized: false,
+  setAuth: (user) => set({ user, isAuthenticated: true, isInitialized: true }),
+  logout: () => set({ user: null, isAuthenticated: false, isInitialized: true }),
+  isSuperAdmin: () => get().user?.role === 'SUPER_ADMIN',
+  isAdmin: () => {
+    const role = get().user?.role;
+    return role === 'ADMIN' || role === 'SUPER_ADMIN';
+  },
+}));

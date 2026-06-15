@@ -42,4 +42,17 @@ export const env = {
   // Query limits
   MAX_QUERY_ROWS: parseInt(process.env.MAX_QUERY_ROWS || '10000', 10),
   QUERY_TIMEOUT_MS: parseInt(process.env.QUERY_TIMEOUT_MS || '30000', 10),
+
+  // Super Admin Seeding
+  SUPER_ADMIN_EMAIL: process.env.SUPER_ADMIN_EMAIL || '',
+  SUPER_ADMIN_PASSWORD: process.env.SUPER_ADMIN_PASSWORD || '',
+  SUPER_ADMIN_NAME: process.env.SUPER_ADMIN_NAME || 'Platform Owner',
+
+  // Payment Gateways
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || '',
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || '',
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || '',
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || '',
+  STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY || '',
 } as const;

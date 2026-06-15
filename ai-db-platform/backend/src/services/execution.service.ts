@@ -86,7 +86,11 @@ export const explainQuery = async (
   try {
     client = await pool.connect();
     await client.query(`SET statement_timeout = ${env.QUERY_TIMEOUT_MS}`);
+    
+    // Security Fix: Wrap EXPLAIN in a READ ONLY transaction to prevent 
+    // destructive DDL (like DROP TABLE) if injected via multiple statements
     await client.query('BEGIN');
+    await client.query('SET TRANSACTION READ ONLY');
 
     const explainSql = `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`;
     const result = await client.query(explainSql);

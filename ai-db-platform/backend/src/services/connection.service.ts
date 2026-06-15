@@ -76,9 +76,9 @@ export const listConnections = async (userId: string): Promise<ConnectionRow[]> 
 
 // ── Delete Connection ──────────────────────────────────────
 export const deleteConnection = async (connectionId: string, userId: string): Promise<void> => {
-  // Hard delete to avoid unique constraint issues with names
+  // Soft delete to preserve audit trail
   const result = await query(
-    'DELETE FROM db_connections WHERE id = $1 AND user_id = $2',
+    'UPDATE db_connections SET is_active = false, deleted_at = NOW() WHERE id = $1 AND user_id = $2',
     [connectionId, userId]
   );
   if (result.rowCount === 0) throw new ApiError(404, 'Connection not found or unauthorized');

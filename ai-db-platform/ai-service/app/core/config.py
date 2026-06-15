@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     
     # Security & CORS
     BACKEND_URL: str = "http://localhost:3001"
+    CORS_ORIGINS: str = ""
     AI_SERVICE_SECRET: str
     
     @model_validator(mode="after")

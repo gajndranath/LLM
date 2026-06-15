@@ -12,6 +12,7 @@ import { ApiError } from '../utils/ApiError';
 import { executeQuery } from '../services/execution.service';
 import { createRateLimiter } from '../middleware/rateLimit.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
+import { checkLLMQueryLimit } from '../middleware/plan.middleware';
 import { aiClient } from '../services/aiClient';
 import { redisClient, getRedisStatus } from '../config/redis';
 
@@ -46,7 +47,7 @@ const rollbackFixSchema = z.object({
 });
 
 // POST /api/architect/review — Deep audit of connected DB
-router.post('/review', requireMinRole('ANALYST'), architectRateLimiter, validateRequest(reviewSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/review', requireMinRole('ANALYST'), architectRateLimiter, checkLLMQueryLimit, validateRequest(reviewSchema), asyncHandler(async (req: Request, res: Response) => {
   const { connectionId, requirements, scale } = req.body;
   
   if (!connectionId) {

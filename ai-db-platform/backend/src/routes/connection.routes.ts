@@ -10,6 +10,7 @@ import {
 } from '../services/connection.service';
 import { extractSchema } from '../services/schema.service';
 import { validateRequest } from '../middleware/validation.middleware';
+import { checkConnectionLimit } from '../middleware/plan.middleware';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 
@@ -28,21 +29,25 @@ const connectionSchema = z.object({
   sslEnabled: z.boolean().optional(),
 });
 
-// POST /api/connections
-router.post('/', validateRequest(connectionSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { name, host, port, databaseName, username, password, sslEnabled } = req.body;
-  
-  const connection = await createConnection(req.user!.userId, {
-    name, host, port, databaseName, username, password, sslEnabled,
-  });
-  
-  console.log(`[AUDIT] User ${req.user!.userId} created db_connection ${connection.id} (${connection.name})`);
+// ── Create Connection ──────────────────────────────────────
+router.post(
+  '/',
+  validateRequest(connectionSchema),
+  checkConnectionLimit,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { name, host, port, databaseName, username, password, sslEnabled } = req.body;
+    
+    const connection = await createConnection(req.user!.userId, {
+      name, host, port, databaseName, username, password, sslEnabled,
+    });
+    
+    console.log(`[AUDIT] User ${req.user!.userId} created db_connection ${connection.id} (${connection.name})`);
 
-  return res.status(201).json(
-    new ApiResponse(201, connection, "Connection created successfully")
-  );
-}));
-
+    return res.status(201).json(
+      new ApiResponse(201, connection, "Connection created successfully")
+    );
+  })
+);
 // GET /api/connections
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   const connections = await listConnections(req.user!.userId);

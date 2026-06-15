@@ -11,6 +11,7 @@ const ROLE_HIERARCHY: UserRole[] = [
   'SUPER_ADMIN',
 ];
 
+// Require one of specific roles (exact match)
 export const requireRole = (...roles: UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const userRole = req.user?.role;
@@ -58,3 +59,7 @@ export const requireMinRole = (minRole: UserRole) => {
     next();
   };
 };
+
+// Shorthand: only SUPER_ADMIN can access
+export const requireSuperAdmin = requireRole('SUPER_ADMIN');
+

@@ -4,7 +4,7 @@ import Editor from '@monaco-editor/react';
 import { connectionsApi } from '../api/connections.api';
 import { queryApi } from '../api/query.api';
 import { useSchemaExtract } from '../hooks/useSchemaExtract';
-import { useApp } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import {
   Terminal,
   Play,
@@ -29,7 +29,7 @@ import MermaidChart from '../components/MermaidChart';
 import TableDataInspector from '../components/TableDataInspector';
 
 const QueryPage = () => {
-  const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useApp();
+  const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useAppContext();
   const [naturalQuery, setNaturalQuery] = useState('');
   const [inspectingTable, setInspectingTable] = useState<string | null>(null);
   const [generatedSql, setGeneratedSql] = useState('');

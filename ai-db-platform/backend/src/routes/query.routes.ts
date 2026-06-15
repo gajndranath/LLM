@@ -12,6 +12,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { createRateLimiter } from '../middleware/rateLimit.middleware';
+import { checkLLMQueryLimit } from '../middleware/plan.middleware';
 import { redisClient, getRedisStatus } from '../config/redis';
 
 const router = Router();
@@ -76,7 +77,7 @@ const insightsQuerySchema = z.object({
 });
 
 // POST /api/query/generate — Natural language → SQL
-router.post('/generate', requireMinRole('ANALYST'), apiRateLimiter, validateRequest(generateQuerySchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/generate', requireMinRole('ANALYST'), apiRateLimiter, checkLLMQueryLimit, validateRequest(generateQuerySchema), asyncHandler(async (req: Request, res: Response) => {
   const { naturalQuery, connectionId } = req.body;
 
   const pool = await getConnectionPool(connectionId, req.user!.userId);
@@ -169,7 +170,7 @@ router.post('/explain', requireMinRole('ANALYST'), apiRateLimiter, validateReque
 }));
 
 // POST /api/query/optimize — Optimize bad query
-router.post('/optimize', requireMinRole('ANALYST'), apiRateLimiter, validateRequest(optimizeQuerySchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/optimize', requireMinRole('ANALYST'), apiRateLimiter, checkLLMQueryLimit, validateRequest(optimizeQuerySchema), asyncHandler(async (req: Request, res: Response) => {
   const { sql, connectionId } = req.body;
 
   const pool = await getConnectionPool(connectionId, req.user!.userId);
@@ -218,7 +219,7 @@ router.get('/history', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // POST /api/query/insights — Generate NL insights from results
-router.post('/insights', requireMinRole('ANALYST'), apiRateLimiter, validateRequest(insightsQuerySchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/insights', requireMinRole('ANALYST'), apiRateLimiter, checkLLMQueryLimit, validateRequest(insightsQuerySchema), asyncHandler(async (req: Request, res: Response) => {
   const { query: naturalQuery, results, connectionId } = req.body;
 
   let schemaContext = "";

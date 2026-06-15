@@ -1,10 +1,38 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { env } from '../config/env';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let transporter: nodemailer.Transporter | null = null;
+
+const initTransporter = async () => {
+  if (transporter) return transporter;
+  
+  if (process.env.SMTP_HOST) {
+    transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+  } else {
+    console.log('⚠️ No SMTP config found. Generating test Ethereal account for local dev...');
+    const testAccount = await nodemailer.createTestAccount();
+    transporter = nodemailer.createTransport({
+      host: testAccount.smtp.host,
+      port: testAccount.smtp.port,
+      secure: testAccount.smtp.secure,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    });
+  }
+  return transporter;
+};
 
 /**
- * Standard Email Service for sending OTPs and Notifications via Resend
+ * Standard Email Service for sending OTPs and Notifications via Nodemailer
  */
 export const sendEmail = async (options: {
   to: string;
@@ -14,19 +42,25 @@ export const sendEmail = async (options: {
   otp?: string;
 }) => {
   try {
-    const { data, error } = await resend.emails.send({
-      from: process.env.RESEND_FROM || 'AI DB Platform <onboarding@resend.dev>',
+    const t = await initTransporter();
+    
+    const info = await t.sendMail({
+      from: process.env.SMTP_FROM || '"AI DB Platform" <noreply@aidb.local>',
       to: options.to,
       subject: options.subject,
-      ...(options.html ? { html: options.html } : { text: options.text || '' }),
-    } as any);
+      text: options.text,
+      html: options.html,
+    });
 
-    if (error) {
-      throw new Error(error.message);
+    console.log('📧 Email sent successfully! Message ID:', info.messageId);
+    
+    if (!process.env.SMTP_HOST) {
+      console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('👀 Email Preview URL: %s', nodemailer.getTestMessageUrl(info));
+      console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     }
 
-    console.log('📧 Email sent successfully:', data?.id);
-    return data;
+    return info;
   } catch (error) {
     console.error('❌ Failed to send email:', error);
 
@@ -44,7 +78,6 @@ export const sendEmail = async (options: {
       `);
     }
 
-    // Only throw in production so dev can continue without email
     if (env.NODE_ENV === 'production') throw error;
   }
 };
@@ -68,10 +101,13 @@ export const sendOTPEmail = async (email: string, otp: string) => {
     </div>
   `;
 
+  const text = `Verify Your Account\n\nWelcome to AI DB Platform! Use the one-time password below to verify your email address. This code will expire in 5 minutes.\n\nOTP Code: ${otp}\n\nIf you didn't request this, you can safely ignore this email.`;
+
   await sendEmail({
     to: email,
-    subject: `Verify Your Account — OTP: ${otp}`,
+    subject: `Your AI DB Platform Login Code: ${otp}`,
     html,
+    text,
     otp,
   });
 };

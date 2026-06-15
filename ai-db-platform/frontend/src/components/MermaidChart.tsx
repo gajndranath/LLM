@@ -99,7 +99,8 @@ function sanitizeMermaidChart(chart: string): string {
 const MermaidChart: React.FC<MermaidProps> = ({ chart }) => {
   const [svg, setSvg] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const idRef = useRef(`mermaid-${Math.random().toString(36).substring(2, 9)}`);
+  const reactId = React.useId().replace(/:/g, '');
+  const idRef = useRef(`mermaid-${reactId}`);
 
   useEffect(() => {
     if (chart) {

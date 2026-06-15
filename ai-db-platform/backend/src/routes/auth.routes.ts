@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { 
   register, 
+  registerOrg,
   login, 
   refreshAccessToken, 
   logout, 
@@ -73,13 +74,26 @@ router.post('/send-otp', authRateLimiter, validateRequest(sendOtpSchema), asyncH
   return res.status(200).json(new ApiResponse(200, result, "OTP sent successfully"));
 }));
 
+// Helper to set HTTP-Only Cookie
+const setAuthCookie = (res: Response, token: string) => {
+  res.cookie('jwt', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  });
+};
+
 // POST /api/auth/register
 router.post('/register', authRateLimiter, validateRequest(registerSchema), asyncHandler(async (req: Request, res: Response) => {
   const { name, email, password, otp } = req.body;
   const result = await register({ name, email, password, otp });
   
+  setAuthCookie(res, result.accessToken);
+  const { accessToken, refreshToken, ...userData } = result as any;
+  
   return res.status(201).json(
-    new ApiResponse(201, result, "Registration successful")
+    new ApiResponse(201, userData, "Registration successful")
   );
 }));
 
@@ -88,8 +102,11 @@ router.post('/login', authRateLimiter, validateRequest(loginSchema), asyncHandle
   const { email, password } = req.body;
   const result = await login({ email, password });
   
+  setAuthCookie(res, result.accessToken);
+  const { accessToken, refreshToken, ...userData } = result as any;
+  
   return res.status(200).json(
-    new ApiResponse(200, result, "Login successful")
+    new ApiResponse(200, userData, "Login successful")
   );
 }));
 
@@ -112,18 +129,21 @@ router.post('/refresh', validateRequest(refreshSchema), asyncHandler(async (req:
   const { refreshToken } = req.body;
   const accessToken = await refreshAccessToken(refreshToken);
   
+  setAuthCookie(res, accessToken);
+  
   return res.status(200).json(
-    new ApiResponse(200, { accessToken }, "Token refreshed")
+    new ApiResponse(200, null, "Token refreshed")
   );
 }));
 
 // POST /api/auth/logout
-router.post('/logout', validateRequest(logoutSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/logout', asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
-    await logout(refreshToken);
+    try { await logout(refreshToken); } catch (e) {}
   }
   
+  res.clearCookie('jwt');
   return res.status(200).json(
     new ApiResponse(200, null, "Logged out successfully")
   );
@@ -137,5 +157,35 @@ router.get('/me', authenticate, asyncHandler(async (req: Request, res: Response)
     new ApiResponse(200, { user }, "User profile fetched")
   );
 }));
+
+// POST /api/auth/register-org — Organization (company) self-registration
+const registerOrgSchema = z.object({
+  companyName: z.string().min(2, 'Company name must be at least 2 characters').max(255),
+  adminName:   z.string().min(2, 'Admin name must be at least 2 characters').max(100),
+  email:       z.string().email('Invalid email format'),
+  password:    z.string().min(8, 'Password must be at least 8 characters')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+  plan: z.enum(['free', 'pro', 'mega']),
+  otp: z.string().length(6, 'OTP must be exactly 6 digits'),
+});
+
+router.post(
+  '/register-org',
+  authRateLimiter,
+  validateRequest(registerOrgSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { companyName, adminName, email, password, plan, otp } = req.body;
+    const result = await registerOrg({ companyName, adminName, email, password, plan, otp });
+    
+    setAuthCookie(res, result.accessToken);
+    const { accessToken, refreshToken, ...userData } = result as any;
+
+    return res.status(201).json(
+      new ApiResponse(201, userData, 'Organization registered successfully')
+    );
+  })
+);
 
 export default router;

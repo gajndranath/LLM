@@ -11,6 +11,7 @@ import { ApiError } from '../utils/ApiError';
 import { env } from '../config/env';
 import { createRateLimiter } from '../middleware/rateLimit.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
+import { checkLLMQueryLimit } from '../middleware/plan.middleware';
 
 const router = Router();
 router.use(authenticate);
@@ -54,7 +55,7 @@ const deploySchema = z.object({
 // ── GET /api/design-studio/sessions — List all sessions ──────
 router.get('/sessions', asyncHandler(async (req: Request, res: Response) => {
   const result = await query(
-    `SELECT id, mode, connection_id, status, current_design, requirements_transcript, created_at, updated_at
+    `SELECT id, mode, connection_id, status, current_design, created_at, updated_at
      FROM design_studio_sessions
      WHERE user_id = $1
      ORDER BY updated_at DESC
@@ -69,9 +70,9 @@ router.post('/sessions', studioRateLimiter, validateRequest(createSessionSchema)
   const { mode, connectionId } = req.body;
 
   const result = await query(
-    `INSERT INTO design_studio_sessions (user_id, mode, connection_id, requirements_transcript, status)
-     VALUES ($1, $2, $3, '[]'::jsonb, 'active')
-     RETURNING id, mode, connection_id, status, requirements_transcript, created_at`,
+    `INSERT INTO design_studio_sessions (user_id, mode, connection_id, status)
+     VALUES ($1, $2, $3, 'active')
+     RETURNING id, mode, connection_id, status, created_at`,
     [req.user!.userId, mode, connectionId || null]
   );
 
@@ -79,12 +80,12 @@ router.post('/sessions', studioRateLimiter, validateRequest(createSessionSchema)
 }));
 
 // ── POST /api/design-studio/probe — AI asks requirements questions ─
-router.post('/probe', studioRateLimiter, validateRequest(probeSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/probe', studioRateLimiter, checkLLMQueryLimit, validateRequest(probeSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId, userMessage } = req.body;
 
   // Load session + existing transcript + connection_id
   const sessionResult = await query(
-    `SELECT id, requirements_transcript, connection_id FROM design_studio_sessions
+    `SELECT id, connection_id FROM design_studio_sessions
      WHERE id = $1 AND user_id = $2`,
     [sessionId, req.user!.userId]
   );
@@ -93,7 +94,12 @@ router.post('/probe', studioRateLimiter, validateRequest(probeSchema), asyncHand
   }
 
   const session = sessionResult.rows[0];
-  const transcript: { role: string; content: string }[] = session.requirements_transcript || [];
+
+  const transcriptResult = await query(
+    `SELECT role, content FROM session_messages WHERE session_id = $1 ORDER BY created_at ASC`,
+    [sessionId]
+  );
+  const transcript = transcriptResult.rows;
 
   // NEW: Fetch schema context if it's an existing DB session
   let schemaContext = "";
@@ -123,19 +129,24 @@ router.post('/probe', studioRateLimiter, validateRequest(probeSchema), asyncHand
   const isReady = atlasReply.includes('READY_TO_GENERATE');
   const cleanReply = atlasReply.replace('READY_TO_GENERATE', '').trim();
 
-  // Append both messages to transcript
+  // Append both messages to relational table
+  await query('BEGIN');
+  await query(
+    `INSERT INTO session_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
+    [sessionId, userMessage]
+  );
+  await query(
+    `INSERT INTO session_messages (session_id, role, content) VALUES ($1, 'atlas', $2)`,
+    [sessionId, cleanReply]
+  );
+  await query('UPDATE design_studio_sessions SET updated_at = NOW() WHERE id = $1', [sessionId]);
+  await query('COMMIT');
+
   const updatedTranscript = [
     ...transcript,
     { role: 'user', content: userMessage },
-    { role: 'atlas', content: cleanReply },
+    { role: 'atlas', content: cleanReply }
   ];
-
-  await query(
-    `UPDATE design_studio_sessions
-     SET requirements_transcript = $1::jsonb, updated_at = NOW()
-     WHERE id = $2`,
-    [JSON.stringify(updatedTranscript), sessionId]
-  );
 
   return res.json(
     new ApiResponse(200, {
@@ -147,11 +158,11 @@ router.post('/probe', studioRateLimiter, validateRequest(probeSchema), asyncHand
 }));
 
 // ── POST /api/design-studio/generate-schema — Build full blueprint ─
-router.post('/generate-schema', studioRateLimiter, validateRequest(generateSchemaSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/generate-schema', studioRateLimiter, checkLLMQueryLimit, validateRequest(generateSchemaSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId } = req.body;
 
   const sessionResult = await query(
-    `SELECT id, requirements_transcript FROM design_studio_sessions
+    `SELECT id FROM design_studio_sessions
      WHERE id = $1 AND user_id = $2 AND mode = 'new'`,
     [sessionId, req.user!.userId]
   );
@@ -159,7 +170,11 @@ router.post('/generate-schema', studioRateLimiter, validateRequest(generateSchem
     throw new ApiError(404, 'Session not found or not in new-db mode');
   }
 
-  const transcript: { role: string; content: string }[] = sessionResult.rows[0].requirements_transcript || [];
+  const transcriptResult = await query(
+    `SELECT role, content FROM session_messages WHERE session_id = $1 ORDER BY created_at ASC`,
+    [sessionId]
+  );
+  const transcript = transcriptResult.rows;
   const conversationTranscript = transcript
     .map((m: { role: string; content: string }) => `${m.role === 'user' ? 'User' : 'ATLAS'}: ${m.content}`)
     .join('\n');
@@ -276,7 +291,7 @@ router.post('/deploy', studioRateLimiter, validateRequest(deploySchema), asyncHa
 }));
 
 // ── POST /api/design-studio/audit-existing — Full A-to-Z audit ──
-router.post('/audit-existing', studioRateLimiter, validateRequest(auditExistingSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/audit-existing', studioRateLimiter, checkLLMQueryLimit, validateRequest(auditExistingSchema), asyncHandler(async (req: Request, res: Response) => {
   const { sessionId, connectionId, userConcerns } = req.body;
 
   // Pull the live schema from user's database

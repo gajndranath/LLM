@@ -28,8 +28,8 @@ const Login = () => {
 
     try {
       const res = await authApi.login({ email, password });
-      const { user, accessToken } = res.data;
-      setAuth(user, accessToken);
+      const { user } = res.data;
+      setAuth(user);
       toast.success("Welcome back!");
     } catch (err: any) {
       toast.error(err.message || 'Login failed. Please check your credentials.');
@@ -111,8 +111,8 @@ const Login = () => {
         <div className="mt-10 pt-8 border-t border-white/5 text-center">
           <p className="text-slate-400 font-medium">
             New to the platform?{' '}
-            <Link to="/register" className="text-white font-bold hover:text-blue-400 transition-colors underline underline-offset-4">
-              Create an account
+            <Link to="/register-org" className="text-white font-bold hover:text-blue-400 transition-colors underline underline-offset-4">
+              Register your company
             </Link>
           </p>
         </div>
