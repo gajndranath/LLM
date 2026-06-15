@@ -5,6 +5,7 @@ import {
   Database,
   Plus,
   Trash2,
+  CheckCircle,
   Loader2,
   RefreshCw,
   Search,
