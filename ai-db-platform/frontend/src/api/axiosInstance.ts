@@ -22,9 +22,14 @@ api.interceptors.response.use(
 
     // Handle session expiry
     if (error.response?.status === 401 && !originalRequest._retry) {
-      if (originalRequest.url !== '/auth/login') {
+      if (originalRequest.url !== '/auth/login' && originalRequest.url !== '/auth/me') {
+        const wasAuthenticated = useAuthStore.getState().isAuthenticated;
         useAuthStore.getState().logout();
-        toast.error("Session expired. Please login again.");
+        if (wasAuthenticated) {
+          toast.error("Session expired. Please login again.");
+        }
+      } else if (originalRequest.url === '/auth/me') {
+        useAuthStore.getState().logout();
       }
     }
 
