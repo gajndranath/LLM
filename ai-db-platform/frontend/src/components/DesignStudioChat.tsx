@@ -97,7 +97,7 @@ export default function DesignStudioChat({
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center opacity-40 space-y-3">
             <Sparkles size={32} className="text-blue-400" />
-            <p className="text-sm font-medium">ATLAS aapka intezaar kar raha hai...<br />{mode === 'new' ? 'Apne database ka vision share karo!' : 'Database modify karne ke liye command do!'}</p>
+            <p className="text-sm font-medium">ATLAS is ready...<br />{mode === 'new' ? 'Share your database vision!' : 'Provide commands to modify the database!'}</p>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -163,7 +163,7 @@ export default function DesignStudioChat({
         <div className="flex space-x-2">
           <input
             className="flex-1 bg-white/5 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            placeholder={mode === 'new' ? "Apna database idea batao..." : "Database change karne ka command do..."}
+            placeholder={mode === 'new' ? "Describe your database idea..." : "Provide a command to modify the database..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}

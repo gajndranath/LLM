@@ -154,7 +154,7 @@ export default function ArchitectStudio() {
       if (mode === 'new') {
         setMessages([{
           role: 'atlas',
-          content: "Namaste! Main ATLAS hoon — aapka Senior Database Architect. 🙏\n\nAapka database idea batao — app kaisa hai, kitne users honge, kya features chahiye? Hum milke ek perfect blueprint banayenge!"
+          content: "Hello! I am ATLAS — your Senior Database Architect.\n\nTell me about your database requirements — what is the application about, how many users do you expect, and what features do you need? We will build the perfect blueprint together!"
         }]);
       } else {
         handleAudit(session.id);
@@ -212,7 +212,7 @@ export default function ArchitectStudio() {
   };
 
   const handleAudit = async (sid?: string) => {
-    if (!selectedConnectionId) return toast.error('Database connection select karo');
+    if (!selectedConnectionId) return toast.error('Please select a database connection');
     setIsAuditRunning(true);
     setAudit(null);
     try {
@@ -291,7 +291,7 @@ export default function ArchitectStudio() {
         <div className="lg:col-span-3 flex flex-col space-y-4">
           <button
             onClick={() => {
-              if (mode === 'existing' && !selectedConnectionId) return toast.error('Connection select karo');
+              if (mode === 'existing' && !selectedConnectionId) return toast.error('Please select a connection');
               createSession.mutate({ mode, connectionId: selectedConnectionId || undefined });
             }}
             disabled={createSession.isPending}
@@ -464,7 +464,7 @@ export default function ArchitectStudio() {
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-40 space-y-4">
               <Wand2 size={40} className="text-purple-400" />
               <h3 className="text-lg font-bold">ATLAS Architect Studio</h3>
-              <p className="text-sm">Session start karo ya history se load karo</p>
+              <p className="text-sm">Start a new session or load from history</p>
             </div>
           ) : (
             <DesignStudioChat
