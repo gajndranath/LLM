@@ -15,6 +15,14 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+api.interceptors.request.use((config) => {
+  const user = useAuthStore.getState().user;
+  if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') {
+    config.headers['x-bypass-maintenance'] = 'true';
+  }
+  return config;
+});
+
 api.interceptors.response.use(
   (response) => {
     return response;
