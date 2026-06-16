@@ -25,7 +25,7 @@ import designStudioRoutes from './routes/design-studio.routes';
 import tableInspectorRoutes from './routes/table-inspector.routes';
 import adminRoutes from './routes/admin.routes';
 import superAdminRoutes from './routes/super-admin.routes';
-import './socket'; // Initialize socket listeners
+import { initializeSocket } from './socket'; // Initialize socket listeners
 
 const app = express();
 const httpServer = createServer(app);
@@ -248,7 +248,10 @@ const bootstrap = async () => {
     // 3. Start periodic DB cleanup tasks
     startCleanupScheduler();
 
-    // 4. Listen for requests
+    // 4. Initialize Socket.io Event Listeners
+    initializeSocket(io);
+
+    // 5. Listen for requests
     httpServer.listen(env.PORT, () => {
       console.log(`\n🚀 Backend Live: http://localhost:${env.PORT}`);
       console.log(`🌍 Environment: ${env.NODE_ENV}\n`);

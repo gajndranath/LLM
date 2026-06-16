@@ -1,11 +1,12 @@
-import { io } from './index';
+import { Server } from 'socket.io';
 import axios from 'axios';
 import { env } from './config/env';
 import { dbQuery } from './config/database';
 import { getConnectionPool } from './services/connection.service';
 import { extractSchema, formatSchemaForPrompt } from './services/schema.service';
 
-io.on('connection', (socket) => {
+export const initializeSocket = (io: Server) => {
+  io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.io: ${socket.id}`);
 
   socket.on('disconnect', () => {
@@ -107,3 +108,4 @@ io.on('connection', (socket) => {
     }
   });
 });
+};
