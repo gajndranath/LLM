@@ -3,10 +3,12 @@ import { useAuthStore } from '../store/authStore';
 import { toast } from 'sonner';
 
 if (import.meta.env.PROD && !import.meta.env.VITE_API_URL) {
-  throw new Error("❌ BUILD ERROR: VITE_API_URL environment variable is required in production mode!");
+  console.warn("VITE_API_URL is missing, falling back to Render Production URL.");
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const defaultApiUrl = isLocalhost ? 'http://localhost:3001/api' : 'https://llm-3qnu.onrender.com/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || defaultApiUrl;
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -30,6 +32,13 @@ api.interceptors.response.use(
         }
       } else if (originalRequest.url === '/auth/me') {
         useAuthStore.getState().logout();
+      }
+    }
+
+    // Handle Maintenance Mode
+    if (error.response?.status === 503 && error.response?.data?.message?.includes('maintenance')) {
+      if (window.location.pathname !== '/maintenance') {
+        window.location.href = '/maintenance';
       }
     }
 

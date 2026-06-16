@@ -1,6 +1,7 @@
 import re
 import json
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from app.core.llm_factory import LLMFactory
@@ -18,9 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    def __init__(self):
-        self.llm = LLMFactory.get_llm()
-        self.model_name = settings.LLM_MODEL  # FIX: was self.model (undefined attr)
+    def __init__(self, provider: str = None, model: str = None):
+        self.llm = LLMFactory.get_llm(provider, model)
+        self.model_name = model or settings.LLM_MODEL
         self.sql_parser = JsonOutputParser(pydantic_object=SQLGenerationOutput)
         self.opt_parser = JsonOutputParser(pydantic_object=OptimizationResponse)
 
@@ -90,6 +91,7 @@ Instructions:
             raise Exception(f"Failed to parse and repair JSON output: {repair_err}") from repair_err
 
     # ── SQL Generation ─────────────────────────────────────────
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate_sql(self, natural_query: str, schema_context: str) -> SQLGenerationOutput:
         """Convert natural language to SQL and suggest a visualization."""
         # FIX: removed duplicate/broken first prompt that was overwritten anyway
@@ -107,32 +109,24 @@ SENIOR ENGINEER RULES:
 5. Consider ACID properties; don't suggest destructive operations without warnings.
 6. If the query is complex, add a brief 'Senior Tip' in the explanation about performance.
 7. Always check the SCHEMA CONTEXT for correct schema names (e.g. 'inventory.products' instead of 'products'). Don't assume 'public'.
-8. If the user asks to 'list tables', query 'information_schema.tables' for all non-system schemas.
-
-Return ONLY a valid JSON:
-{{
-    "sql": "...",
-    "explanation": "Brief reasoning + Senior Architect Tip...",
-    "warnings": ["Warning 1"],
-    "confidence": 0.95,
-    "provider": "Groq",
-    "model": "{self.model_name}",
-    "chart_recommendation": {{ "type": "bar/line/pie/area/table/none", "x_axis": "...", "y_axis": "...", "label": "..." }}
-}}"""
+8. If the user asks to 'list tables', query 'information_schema.tables' for all non-system schemas."""
 
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Requirement: {natural_query}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, self.sql_parser, SQLGenerationOutput)
-            return SQLGenerationOutput(**result)
+            structured_llm = self.llm.with_structured_output(SQLGenerationOutput)
+            result = structured_llm.invoke(messages)
+            result.provider = getattr(self.llm, "_llm_type", "Unknown")
+            result.model = self.model_name
+            return result
         except Exception as e:
             logger.error(f"LLM SQL Generation Error: {str(e)}")
             raise
 
     # ── Query Optimization ─────────────────────────────────────
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def optimize_query(self, sql: str, schema_context: str, explain_plan: dict = None) -> OptimizationResponse:
         """Optimize an existing SQL query for 40M+ scale."""
         system_prompt = f"""You are a Senior PostgreSQL Performance Engineer.
@@ -146,48 +140,28 @@ SCALABILITY CHECKLIST:
 2. Partitioning: If the table is huge, suggest Horizontal Partitioning.
 3. Batching: Recommend breaking large UPDATES/DELETES into smaller batches.
 4. Replicas: If it is a heavy READ query, suggest moving it to a Read Replica.
-5. Caching: Identify if this result should be cached in Redis.
-
-Return ONLY raw JSON:
-{{
-    "optimized_sql": "...",
-    "issues": ["Issue 1 (e.g. Sequential Scan)"],
-    "suggestions": ["Suggestion 1"],
-    "index_recommendations": ["CREATE INDEX..."]
-}}"""
+5. Caching: Identify if this result should be cached in Redis."""
 
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Query to optimize: {sql}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, self.opt_parser, OptimizationResponse)
-            return OptimizationResponse(**result)
+            structured_llm = self.llm.with_structured_output(OptimizationResponse)
+            return structured_llm.invoke(messages)
         except Exception as e:
             logger.error(f"LLM Optimization Error: {str(e)}")
             raise
 
     # ── Insights Generation ────────────────────────────────────
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate_insights(self, query: str, results: list, schema_context: str = "") -> InsightsResponse:
         """Generate NL insights and technical diagrams (ERD, DFD, Flow)."""
-        ins_parser = JsonOutputParser(pydantic_object=InsightsResponse)
         system_prompt = f"""You are a Master Data Scientist and Database Architect.
 Analyze these query results and provide deep insights along with technical visualizations.
 
 SCHEMA CONTEXT (Use this for ERD):
 {schema_context}
-
-Return ONLY valid JSON:
-{{
-    "summary": "High-level summary of the data story...",
-    "key_findings": ["Finding 1", "Finding 2"],
-    "anomalies": ["Outlier in column X", "Unexpected nulls"],
-    "recommendations": ["Optimize index on Y", "Data cleanup needed for Z"],
-    "erd_mermaid": "erDiagram\\n  TABLE1 ||--o{{ TABLE2 : relates\\n  ...", 
-    "dfd_mermaid": "graph TD\\n  A[Source Tables] --> B[Filter/Join] --> C[Aggregation] --> D[Final Result]",
-    "flow_mermaid": "sequenceDiagram\\n  participant User\\n  participant DB\\n  User->>DB: Query for X\\n  DB-->>User: Returns Y rows with trend Z"
-}}
 
 DIAGRAM RULES:
 1. erd_mermaid: Must be valid erDiagram syntax based on the schema context and query.
@@ -199,14 +173,14 @@ DIAGRAM RULES:
             HumanMessage(content=f"Query: {query}\nResults: {str(results)[:4000]}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, ins_parser, InsightsResponse)
-            return InsightsResponse(**result)
+            structured_llm = self.llm.with_structured_output(InsightsResponse)
+            return structured_llm.invoke(messages)
         except Exception as e:
             logger.error(f"LLM Insights Error: {str(e)}")
             raise
 
     # ── Architecture Review (ArchitectPage) ────────────────────
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def analyze_architecture(
         self,
         schema_context: str,
@@ -215,7 +189,6 @@ DIAGRAM RULES:
         history_context: str = "",
     ) -> ArchitectureReviewResponse:
         """Complete System Architecture Audit (Senior Principal Level) with Contextual Memory."""
-        arch_parser = JsonOutputParser(pydantic_object=ArchitectureReviewResponse)
         system_prompt = f"""You are a 20-year Senior Principal Database Architect.
 Perform a Deep Audit of this schema for a scale of {scale}.
 
@@ -230,23 +203,6 @@ MASTER AUDIT CHECKLIST:
 5. Resilience: Backup strategies (PITR) and High Availability.
 6. Normalization vs Performance: When to denormalize for speed.
 
-OUTPUT INSTRUCTIONS:
-Return ONLY a valid JSON object. DO NOT wrap in any root key.
-Fields MUST be at top level.
-
-REQUIRED FIELDS:
-- executive_summary: str
-- component_analysis: List[Dict] (each with 'component', 'status', 'notes')
-- critical_mistakes: List[str]
-- improvement_plan: List[str]
-- suggested_fixes: List[Dict] (each with 'title', 'sql', 'rollback_sql', 'explanation')
-- suggested_missions: List[Dict] (each with 'title', 'description', 'priority', 'reasoning')
-- scalability_score: int (0-100)
-- suggested_diagram_mermaid: str (valid erDiagram syntax)
-
-SQL FIX RULES:
-Provide EXACT PostgreSQL SQL for each fix AND rollback_sql to undo it.
-
 CRITICAL DATA TYPE RULES:
 1. If a column is bytea, cast text using ::bytea or decode().
 2. pgp_sym_encrypt returns bytea. Cast as needed.
@@ -257,9 +213,8 @@ CRITICAL DATA TYPE RULES:
             HumanMessage(content=f"Schema: {schema_context}\nUser Req: {requirements}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, arch_parser, ArchitectureReviewResponse)
-            return ArchitectureReviewResponse(**result)
+            structured_llm = self.llm.with_structured_output(ArchitectureReviewResponse)
+            return structured_llm.invoke(messages)
         except Exception as e:
             logger.error(f"LLM Architecture Audit Error: {str(e)}")
             raise
@@ -268,14 +223,39 @@ CRITICAL DATA TYPE RULES:
     # DESIGN STUDIO METHODS
     # ══════════════════════════════════════════════════════════
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate_requirement_probes(
         self, user_input: str, conversation_context: str = "", schema_context: str = ""
     ) -> str:
         """
         Act as a Requirements Analyst or Live Architect. 
         If schema_context is provided, act as a Live DBA who can suggest SQL fixes.
-        Returns a conversational string (may contain structured <ACTION> blocks).
+        Returns a conversational string.
         """
+        messages = self._build_probe_messages(user_input, conversation_context, schema_context)
+        try:
+            response = await self.llm.ainvoke(messages)
+            return response.content
+        except Exception as e:
+            logger.error(f"LLM Architecture Probe Error: {str(e)}")
+            raise
+
+    async def generate_requirement_probes_stream(
+        self, user_input: str, conversation_context: str = "", schema_context: str = ""
+    ):
+        """
+        Streaming version of generate_requirement_probes.
+        Yields text chunks as they are generated by the LLM.
+        """
+        messages = self._build_probe_messages(user_input, conversation_context, schema_context)
+        try:
+            async for chunk in self.llm.astream(messages):
+                yield chunk.content
+        except Exception as e:
+            logger.error(f"LLM Streaming Probe Error: {str(e)}")
+            raise
+
+    def _build_probe_messages(self, user_input: str, conversation_context: str, schema_context: str):
         system_prompt = f"""You are ATLAS - a 20-year Senior Principal Database Architect.
 
 ROLE 1: Requirements Analyst (New DB)
@@ -317,12 +297,12 @@ Return ONLY your conversational response as plain text (with optional <ACTION> b
             logger.error(f"LLM Requirement Probes Error: {str(e)}")
             raise
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate_schema_from_requirements(self, conversation_transcript: str) -> SchemaGenerationResponse:
         """
         Generate a complete production-ready database blueprint from conversation requirements.
         Covers: normalization, ACID, indexing, pagination, location, full-text search, scaling.
         """
-        schema_parser = JsonOutputParser(pydantic_object=SchemaGenerationResponse)
         system_prompt = f"""You are ATLAS - a 20-year Senior Principal Database Architect.
 Generate a complete database schema based on the provided conversation transcript.
 Structure your response as a valid JSON matching the SchemaGenerationResponse schema.
@@ -347,58 +327,35 @@ MASTER DESIGN CHECKLIST (cover ALL relevant points):
 11. LOAD BALANCING: Identify read-heavy tables that benefit from PostgreSQL read replicas.
 12. STORAGE TIERS: Identify hot (recent) vs cold (archived) data patterns.
 
-CRITICAL INSTRUCTION: You MUST include the `erd_mermaid` field with a valid Mermaid ER Diagram string, and the `scalability_notes` field with a detailed paragraph outlining scalability strategies. DO NOT OMIT THEM.
+ENTERPRISE STRICT RULES (100% ACCURACY REQUIRED):
+- ZERO ORPHAN TABLES: Every single table MUST be connected to at least one other table via a Foreign Key relationship.
+- UNIQUE CONSTRAINTS: Always apply Composite Unique Constraints to mapping/junction tables (e.g., product_id + warehouse_id) to prevent duplicate data entries.
+- TIME & SPACE COMPLEXITY: Ensure data types are strictly optimized (e.g., don't use BIGINT if SMALLINT suffices, except for high-volume logs which MUST use BIGSERIAL).
 
-Return ONLY a valid JSON:
-{{
-    "entities": [
-        {{
-            "name": "table_name",
-            "fields": [
-                {{"column": "id", "type": "UUID PRIMARY KEY DEFAULT gen_random_uuid()", "notes": "Primary key"}},
-                {{"column": "created_at", "type": "TIMESTAMPTZ NOT NULL DEFAULT NOW()", "notes": "Auto timestamp"}}
-            ],
-            "primary_key": "id",
-            "indexes": [
-                "CREATE INDEX idx_users_email ON users(email);",
-                "CREATE INDEX idx_users_created ON users(created_at DESC);"
-            ]
-        }}
-    ],
-    "relationships": [
-        {{"from": "orders", "to": "users", "type": "many-to-one", "via": "user_id"}}
-    ],
-    "sql_scripts": [
-        {{
-            "sql": "CREATE EXTENSION IF NOT EXISTS uuid-ossp;\\nCREATE TABLE users (\\n  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\\n  ...\\n);",
-            "description": "Users table with authentication fields",
-            "rollback_sql": "DROP TABLE IF EXISTS users CASCADE;"
-        }}
-    ],
-    "erd_mermaid": "erDiagram\\n  USERS {{\\n    UUID id PK\\n    string email\\n  }}\\n  ORDERS {{\\n    UUID id PK\\n    UUID user_id FK\\n  }}\\n  USERS ||--o{{ ORDERS : places",
-    "normalization_level": "3NF",
-    "scalability_notes": "Detailed notes on: partitioning strategy, Redis caching candidates, read replica recommendations, storage tiers (hot/cold), connection pooling advice, and estimated row growth projections.",
-    "acid_compliance": true
-}}"""
+THE 3-STEP DAG PIPELINE:
+- Step 1: Abstract Design - Map out entities, relationships, constraints, and data types.
+- Step 2: SQL Generation - Create the exact Postgres SQL dialect scripts and rollback scripts.
+- Step 3: Visual JSON - Generate strict JSON arrays for nodes and edges to be safely rendered into Mermaid ERDs by the UI (eliminating syntax crashes). Populate the `visual_json` field with nodes (tables) and edges (relationships).
+
+CRITICAL INSTRUCTION: You MUST include the `visual_json` field with a valid nodes/edges mapping, the `erd_mermaid` field with a valid Mermaid string, and the `scalability_notes` field with a detailed paragraph outlining scalability strategies. DO NOT OMIT THEM."""
 
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Requirements Conversation:\n{conversation_transcript}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, schema_parser, SchemaGenerationResponse)
-            return SchemaGenerationResponse(**result)
+            structured_llm = self.llm.with_structured_output(SchemaGenerationResponse)
+            return structured_llm.invoke(messages)
         except Exception as e:
             logger.error(f"LLM Schema Generation Error: {str(e)}")
             raise
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def audit_senior_level(self, schema: str, user_concerns: str = "") -> SeniorAuditResponse:
         """
         Full A-to-Z senior audit of an existing database schema.
         Returns: what is good, what is bad, what to fix - with per-category severity scores.
         """
-        audit_parser = JsonOutputParser(pydantic_object=SeniorAuditResponse)
         system_prompt = f"""You are ATLAS - a 20-year Senior Principal Database Architect performing a FULL A-to-Z audit.
 Analyze the following database schema and provide a deep technical audit.
 Identify issues, improvements, bottlenecks, and security concerns.
@@ -407,11 +364,12 @@ Schema: {schema}
 
 AUDIT FRAMEWORK - Review ALL categories:
 
-NORMALIZATION: Check 1NF/2NF/3NF violations, repeated data, improper column grouping.
-INDEXING: Missing indexes on FKs, searchable fields, sort columns. Over-indexing on write-heavy tables.
-ACID & TRANSACTIONS: Are sensitive operations transactional? Are constraints enforced at DB level?
-PERFORMANCE BOTTLENECKS: Sequential scans, N+1 risks, missing composite indexes, huge unbounded JOINs.
-SECURITY: Unencrypted PII, missing Row-Level Security (RLS), no audit log, exposed secrets.
+2. NORMALIZATION: 1NF, 2NF, 3NF, BCNF violations. Detect orphan tables (tables with no foreign keys) and flag them.
+3. PERFORMANCE: Missing indexes on foreign keys, missing composite indexes for frequent query patterns (like tenant_id + created_at).
+4. SECURITY: Unencrypted PII, missing Row-Level Security (RLS).
+5. ACID & TRANSACTIONS: Race conditions in inventory/balances. Missing UNIQUE constraints on junction/mapping tables.
+
+CRITICAL INSTRUCTION: You MUST populate the `suggested_diagram_mermaid` field with a valid, updated Mermaid ERD showing the corrected relationships. Do NOT leave it null. Ensure all suggestions strictly optimize Time and Space complexity.
 SCALABILITY: What breaks at 10x data? Missing partitioning? No archival strategy?
 DATA TYPES: TEXT where VARCHAR is better, FLOAT where NUMERIC is safer, missing NOT NULL constraints.
 RELATIONSHIPS: Missing FK constraints, improper cascade rules, orphaned records risk.
@@ -420,56 +378,21 @@ LOCATION: If geo data exists, is PostGIS GEOGRAPHY type + GiST index being used?
 PAGINATION: Can cursor-based pagination work with current PKs and indexes?
 NAMING CONVENTIONS: Consistent naming? snake_case? Clear, descriptive names?
 
-Return ONLY a valid JSON:
-{{
-    "issues": [
-        {{
-            "category": "Indexing",
-            "severity": "CRITICAL",
-            "title": "Missing index on foreign key orders.user_id",
-            "detail": "Every JOIN between orders and users causes a full table scan. At 1M rows this will be 500ms+ per query.",
-            "table": "orders"
-        }}
-    ],
-    "improvements": [
-        {{
-            "category": "Normalization",
-            "priority": "HIGH",
-            "title": "Extract address into separate table",
-            "detail": "Address fields repeated in users and orders - 2NF violation causing update anomalies.",
-            "sql": "CREATE TABLE addresses (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), street TEXT, city TEXT, country TEXT);\\nALTER TABLE users ADD COLUMN address_id UUID REFERENCES addresses(id);"
-        }}
-    ],
-    "performance_bottlenecks": [
-        "No pagination strategy - unbounded SELECT will load all rows into memory at scale",
-        "Missing composite index on (user_id, created_at) - order history queries will be slow"
-    ],
-    "security_concerns": [
-        "No encryption mentioned for email/phone - GDPR compliance risk",
-        "No audit log table - cannot trace who changed what data"
-    ],
-    "recommendations": [
-        "Add cursor-based pagination using (id, created_at) composite index",
-        "Enable Row Level Security (RLS) on multi-tenant tables"
-    ],
-    "health_score": 62,
-    "erd_mermaid": "erDiagram\n  USER ||--o{{ ORDER : places\n  ...",
-    "dfd_mermaid": "graph TD\n  Client --> API\n  API --> DB\n  ..."
-}}"""
+NAMING CONVENTIONS: Consistent naming? snake_case? Clear, descriptive names?"""
 
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Database Schema to Audit:\n{schema}"),
         ]
         try:
-            response = self.llm.invoke(messages)
-            result = self._parse_and_repair_json(response.content, audit_parser, SeniorAuditResponse)
-            return SeniorAuditResponse(**result)
+            structured_llm = self.llm.with_structured_output(SeniorAuditResponse)
+            return structured_llm.invoke(messages)
         except Exception as e:
             logger.error(f"LLM Senior Audit Error: {str(e)}")
             raise
 
     # ── Schema Diagrams Generation ─────────────────────────────
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def generate_schema_diagrams(self, schema_context: str) -> dict:
         """Generate high-level ERD and DFD for a complete schema context."""
         system_prompt = f"""You are a Senior Database Architect. 

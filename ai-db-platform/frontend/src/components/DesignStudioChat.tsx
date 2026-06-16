@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Loader2, Send, Sparkles, User, Search } from 'lucide-react';
+import { Loader2, Send, Sparkles, User, Search, Edit2 } from 'lucide-react';
 
 interface Message { role: 'user' | 'atlas'; content: string; }
 
@@ -101,13 +101,22 @@ export default function DesignStudioChat({
           </div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} className={`flex items-start space-x-3 ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+          <div key={i} className={`flex items-start space-x-3 ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse group' : ''}`}>
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${msg.role === 'atlas' ? 'bg-blue-600' : 'bg-slate-700'}`}>
               {msg.role === 'atlas' ? <Sparkles size={14} className="text-white" /> : <User size={14} className="text-white" />}
             </div>
             <div className={`max-w-[90%] px-4 py-3 rounded-2xl text-sm font-medium leading-relaxed whitespace-pre-wrap ${msg.role === 'atlas' ? 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none' : 'bg-blue-600 text-white rounded-tr-none'}`}>
               {renderMessageContent(msg.content)}
             </div>
+            {msg.role === 'user' && (
+              <button 
+                onClick={() => setInput(msg.content)}
+                className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-white transition-opacity self-center rounded-lg hover:bg-white/5"
+                title="Edit and resend"
+              >
+                <Edit2 size={14} />
+              </button>
+            )}
           </div>
         ))}
         {isLoading && (

@@ -4,6 +4,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import crypto from 'crypto';
 import cookieParser from 'cookie-parser';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 // Core config
 import { env } from './config/env';
@@ -23,8 +25,25 @@ import designStudioRoutes from './routes/design-studio.routes';
 import tableInspectorRoutes from './routes/table-inspector.routes';
 import adminRoutes from './routes/admin.routes';
 import superAdminRoutes from './routes/super-admin.routes';
+import './socket'; // Initialize socket listeners
 
 const app = express();
+const httpServer = createServer(app);
+export const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: [
+      env.FRONTEND_URL,
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+      'https://llm-coral.vercel.app',
+      /^https:\/\/.*\.ngrok(?:-free)?\.dev$/
+    ],
+    methods: ['GET', 'POST'],
+    credentials: true,
+  }
+});
 
 // ── Standard Middleware ──────────────────────────────────────
 app.use(helmet());
@@ -57,7 +76,38 @@ if (env.NODE_ENV === 'production') {
 }
 
 app.use(cors({
-  origin: env.FRONTEND_URL,
+  origin: function (origin, callback) {
+    // Allowed origins
+    const allowedOrigins = [
+      env.FRONTEND_URL,
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:5173',
+      'https://llm-coral.vercel.app', // Explicitly allow Vercel prod URL
+      /^https:\/\/.*\.ngrok(?:-free)?\.dev$/, // Allow all ngrok tunnels
+    ];
+
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Check if origin is in allowedOrigins or matches regex
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return allowedOrigin === origin;
+    });
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ CORS: Blocked request from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
 }));
@@ -65,6 +115,31 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// ── Root Endpoint ───────────────────────────────────────────
+app.get('/', (req: Request, res: Response) => {
+  res.status(200).json({
+    message: '🚀 AI DB Platform Backend API',
+    version: '1.0.0',
+    status: 'online',
+    baseUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      connections: '/api/connections',
+      query: '/api/query',
+      architect: '/api/architect',
+      billing: '/api/billing',
+      design_studio: '/api/design-studio',
+      admin: '/api/admin',
+      missions: '/api/missions'
+    },
+    ngrok: {
+      tunnelUrl: req.get('host'),
+      warning: 'This is a free tier ngrok tunnel. URL changes on restart.'
+    }
+  });
+});
 
 // ── API Health Endpoint ──────────────────────────────────────
 app.get('/api/health', async (req: Request, res: Response) => {
@@ -101,6 +176,34 @@ app.get('/api/health', async (req: Request, res: Response) => {
       redis: redisStatus
     }
   });
+});
+
+// ── Maintenance Mode Middleware ────────────────────────────────
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'GET' || req.path === '/api/admin/maintenance') {
+    return next(); // Always allow GET requests and the maintenance toggle endpoint
+  }
+
+  let isMaintenance = false;
+  if (getRedisStatus()) {
+    try {
+      const status = await redisClient.get('system:maintenance_mode');
+      isMaintenance = status === 'true';
+    } catch (e) {
+      // Ignore Redis errors
+    }
+  }
+
+  const bypassHeader = req.headers['x-bypass-maintenance'] === 'true';
+
+  if (isMaintenance && !bypassHeader) {
+    return res.status(503).json({
+      error: 'Service Unavailable',
+      message: 'System is currently under maintenance. Mutating operations are temporarily disabled.'
+    });
+  }
+
+  next();
 });
 
 // ── Application Routes ───────────────────────────────────────
@@ -146,7 +249,7 @@ const bootstrap = async () => {
     startCleanupScheduler();
 
     // 4. Listen for requests
-    app.listen(env.PORT, () => {
+    httpServer.listen(env.PORT, () => {
       console.log(`\n🚀 Backend Live: http://localhost:${env.PORT}`);
       console.log(`🌍 Environment: ${env.NODE_ENV}\n`);
     });

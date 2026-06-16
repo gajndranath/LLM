@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_TOKENS: int = 4096  # INCREASED from 2048 to prevent truncation
+    LLM_MAX_TOKENS: int = 8192  # INCREASED to 8192 to prevent Groq truncation
     
     # Security & CORS
     BACKEND_URL: str = "http://localhost:3001"

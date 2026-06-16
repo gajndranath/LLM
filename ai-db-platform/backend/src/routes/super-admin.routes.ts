@@ -234,4 +234,27 @@ router.patch(
   })
 );
 
+// ── SYSTEM MAINTENANCE ─────────────────────────────────────────
+
+router.get('/maintenance', asyncHandler(async (req: Request, res: Response) => {
+  const { getRedisStatus, redisClient } = await import('../config/redis');
+  let isMaintenance = false;
+  if (getRedisStatus()) {
+    const status = await redisClient.get('system:maintenance_mode');
+    isMaintenance = status === 'true';
+  }
+  return res.status(200).json(new ApiResponse(200, { isMaintenance }, 'Maintenance status fetched'));
+}));
+
+router.post('/maintenance/toggle', asyncHandler(async (req: Request, res: Response) => {
+  const { getRedisStatus, redisClient } = await import('../config/redis');
+  if (!getRedisStatus()) throw new ApiError(500, 'Redis is not connected. Cannot toggle maintenance mode.');
+  
+  const currentStatus = await redisClient.get('system:maintenance_mode');
+  const newStatus = currentStatus === 'true' ? 'false' : 'true';
+  await redisClient.set('system:maintenance_mode', newStatus);
+  
+  return res.status(200).json(new ApiResponse(200, { isMaintenance: newStatus === 'true' }, `Maintenance mode turned ${newStatus === 'true' ? 'ON' : 'OFF'}`));
+}));
+
 export default router;

@@ -14,6 +14,7 @@ import TeamManagementPage from './pages/TeamManagementPage';
 import BillingPage from './pages/BillingPage';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import LandingPage from './pages/LandingPage';
+import MaintenancePage from './pages/MaintenancePage';
 import MainLayout from './layouts/MainLayout';
 
 function App() {
@@ -55,6 +56,7 @@ function App() {
       <Route path="/register" element={!isAuthenticated ? <Register /> : <Navigate to="/dashboard" />} />
       <Route path="/register-org" element={!isAuthenticated ? <OrgRegister /> : <Navigate to="/dashboard" />} />
       <Route path="/invite/:token" element={<InviteAcceptPage />} />
+      <Route path="/maintenance" element={<MaintenancePage />} />
 
       {/* ── SUPER_ADMIN Only Routes ───────────────────────── */}
       <Route

@@ -9,11 +9,13 @@ for (const key of required) {
   }
 }
 
+const isProd = process.env.NODE_ENV === 'production';
+
 export const env = {
   // Server
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '3001', 10),
-  FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
+  FRONTEND_URL: process.env.FRONTEND_URL || (isProd ? 'https://llm-coral.vercel.app' : 'http://localhost:3000'),
 
   // Database (platform's own)
   DATABASE_URL: process.env.DATABASE_URL || '',
@@ -36,7 +38,7 @@ export const env = {
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY!,
 
   // AI Service
-  AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
+  AI_SERVICE_URL: process.env.AI_SERVICE_URL || (isProd ? 'https://llm-1-jgn4.onrender.com' : 'http://localhost:8000'),
   AI_SERVICE_SECRET: process.env.AI_SERVICE_SECRET!,
 
   // Query limits

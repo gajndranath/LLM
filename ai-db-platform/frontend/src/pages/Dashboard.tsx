@@ -18,12 +18,12 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useAppContext } from '../context/AppContext';
+import { useWorkspaceStore } from '../store/workspaceStore';
 import { toast } from 'sonner';
 
 const Dashboard = () => {
   const queryClient = useQueryClient();
-  const { selectedConnectionId } = useAppContext();
+  const { selectedConnectionId } = useWorkspaceStore();
 
   const { data: connData } = useQuery({
     queryKey: ['connections'],

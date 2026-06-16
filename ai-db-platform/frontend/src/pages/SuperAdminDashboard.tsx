@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Users, Database, Activity, TrendingUp, DollarSign,
-  Loader2, Search, ShieldCheck, Star
+  Loader2, Search, ShieldCheck, Star, Hammer
 } from 'lucide-react';
 import { superAdminApi } from '../api/auth.api';
 import { toast } from 'sonner';
@@ -22,6 +22,7 @@ const SuperAdminDashboard = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [isMaintenance, setIsMaintenance] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -34,7 +35,10 @@ const SuperAdminDashboard = () => {
       ]);
       const { api } = await import('../api/axiosInstance');
       const plansRes = await api.get('/super-admin/plans').catch(() => ({ data: { data: [] } }));
+      const maintRes = await api.get('/super-admin/maintenance').catch(() => ({ data: { data: { isMaintenance: false } } }));
+      
       setPlansList(plansRes.data.data);
+      setIsMaintenance(maintRes.data?.data?.isMaintenance || false);
       setStats(statsRes.data);
       setOrgs(orgsRes.data.organizations);
       setTotalPages(orgsRes.data.totalPages);
@@ -44,6 +48,17 @@ const SuperAdminDashboard = () => {
       toast.error(err.message || 'Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleMaintenance = async () => {
+    try {
+      const { api } = await import('../api/axiosInstance');
+      const res = await api.post('/super-admin/maintenance/toggle');
+      setIsMaintenance(res.data.data.isMaintenance);
+      toast.success(`Maintenance mode is now ${res.data.data.isMaintenance ? 'ON' : 'OFF'}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to toggle maintenance mode');
     }
   };
 
@@ -128,9 +143,22 @@ const SuperAdminDashboard = () => {
             </h2>
             <p className="text-slate-400 text-sm mt-1">Super Admin Controls</p>
           </div>
-          <div className="bg-slate-800/50 border border-white/5 px-4 py-2 rounded-xl text-sm font-mono text-slate-300 flex items-center space-x-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>System Live</span>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={toggleMaintenance}
+              className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center space-x-2 transition-all ${
+                isMaintenance 
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-lg shadow-amber-500/10' 
+                : 'bg-white/5 text-slate-400 hover:text-white border border-white/5 hover:bg-white/10'
+              }`}
+            >
+              <Hammer size={16} />
+              <span>{isMaintenance ? 'MAINTENANCE ON' : 'MAINTENANCE OFF'}</span>
+            </button>
+            <div className="bg-slate-800/50 border border-white/5 px-4 py-2 rounded-xl text-sm font-mono text-slate-300 flex items-center space-x-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>System Live</span>
+            </div>
           </div>
         </div>
 

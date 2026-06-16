@@ -30,6 +30,9 @@ export interface SchemaContext {
   tables: TableInfo[];
   totalTables: number;
   extractedAt: string;
+  slowQueries?: string[];
+  resolvedMissions?: string[];
+  enums?: { type_name: string; enum_values: string[] }[];
   erd_mermaid?: string;
   dfd_mermaid?: string;
   flow_mermaid?: string;
@@ -66,10 +69,13 @@ export const extractSchema = async (
     }
   }
 
-  const [tables, columnsResult, indexesResult] = await Promise.all([
+  const [tables, columnsResult, indexesResult, enumsResult, missionsResult, slowQueriesResult] = await Promise.all([
     getTables(pool),
     getAllColumns(pool),
     getAllIndexes(pool),
+    getAllEnums(pool),
+    getResolvedMissions(connectionId),
+    getSlowQueries(pool),
   ]);
 
   // Map columns by schema.table key for fast lookup
@@ -118,9 +124,12 @@ export const extractSchema = async (
   });
 
   const schemaContext: SchemaContext = {
-    tables: enrichedTables,
+    tables: enrichedTables.slice(0, 50), // Cap payload to top 50 tables to prevent OOM
     totalTables: enrichedTables.length,
     extractedAt: new Date().toISOString(),
+    enums: enumsResult,
+    resolvedMissions: missionsResult,
+    slowQueries: slowQueriesResult,
   };
 
   // 1. Generate basic ERD instantly
@@ -135,11 +144,13 @@ export const extractSchema = async (
   }
 
   // Cache result for 5 minutes (300 seconds)
-  if (cacheKey && getRedisStatus()) {
-    try {
-      await redisClient.setEx(cacheKey, 300, JSON.stringify(schemaContext));
-    } catch (err) {
-      console.warn("[Schema Cache] Failed to write to Redis:", err);
+  if (cacheKey) {
+    if (getRedisStatus()) {
+      try {
+        await redisClient.setEx(cacheKey, 300, JSON.stringify(schemaContext)); // 5 minutes TTL
+      } catch (err) {
+        console.warn("[Schema Cache] Failed to write to Redis:", err);
+      }
     }
   }
 
@@ -218,7 +229,19 @@ export const formatSchemaForPrompt = (schema: SchemaContext, maxTables = 30): st
 
   const prioritizedTables = tablesWithScores.map(ts => ts.table).slice(0, maxTables);
 
-  return prioritizedTables.map((table) => {
+  const enumStr = schema.enums && schema.enums.length > 0 
+    ? `ENUMS:\n${schema.enums.map(e => `TYPE ${e.type_name} AS ENUM (${e.enum_values.map(v => `'${v}'`).join(', ')})`).join('\n')}\n\n` 
+    : '';
+
+  const missionsStr = schema.resolvedMissions && schema.resolvedMissions.length > 0
+    ? `RESOLVED BUGS / MISSIONS (Do not flag these again unless regression detected):\n${schema.resolvedMissions.map(m => `- ${m}`).join('\n')}\n\n`
+    : '';
+
+  const slowQueriesStr = schema.slowQueries && schema.slowQueries.length > 0
+    ? `REAL-WORLD SLOW QUERIES (From pg_stat_statements):\n${schema.slowQueries.map(q => `- ${q}`).join('\n')}\n\n`
+    : '';
+
+  return slowQueriesStr + missionsStr + enumStr + prioritizedTables.map((table) => {
     const cols = table.columns.map((col) => {
       const pkFlag = col.is_primary_key ? ' PK' : '';
       const fkFlag = col.is_foreign_key
@@ -245,7 +268,7 @@ export const formatSchemaForPrompt = (schema: SchemaContext, maxTables = 30): st
 };
 
 // ── Private: Get Tables ────────────────────────────────────
-const getTables = async (pool: Pool): Promise<Omit<TableInfo, 'columns' | 'indexes'>[]> => {
+async function getTables(pool: Pool): Promise<TableInfo[]> {
   const result = await pool.query(`
     SELECT
       t.table_name,
@@ -262,7 +285,7 @@ const getTables = async (pool: Pool): Promise<Omit<TableInfo, 'columns' | 'index
 };
 
 // ── Private: Get Columns for All User Tables ────────────────
-const getAllColumns = async (pool: Pool): Promise<any[]> => {
+async function getAllColumns(pool: Pool): Promise<any[]> {
   const result = await pool.query(`
     SELECT
       c.table_schema,
@@ -309,7 +332,7 @@ const getAllColumns = async (pool: Pool): Promise<any[]> => {
 };
 
 // ── Private: Get Indexes for All User Tables ────────────────
-const getAllIndexes = async (pool: Pool): Promise<any[]> => {
+async function getAllIndexes(pool: Pool): Promise<any[]> {
   const result = await pool.query(`
     SELECT
       t.relname AS table_name,
@@ -331,4 +354,51 @@ const getAllIndexes = async (pool: Pool): Promise<any[]> => {
     GROUP BY t.relname, n.nspname, i.relname, ix.indisunique, am.amname
   `);
   return result.rows;
+};
+
+// ── Private: Get Resolved Missions ────────────────
+async function getResolvedMissions(connectionId?: string): Promise<string[]> {
+  if (!connectionId) return [];
+  const { dbQuery } = require('../config/database');
+  try {
+    const result = await dbQuery(`
+      SELECT title, description FROM architect_missions 
+      WHERE connection_id = $1 AND status = 'COMPLETED'
+    `, [connectionId]);
+    return result.rows.map((r: any) => `[${r.title}] ${r.description}`);
+  } catch (err) {
+    console.error("Failed to fetch resolved missions", err);
+    return [];
+  }
+};
+
+// ── Private: Get Enums ────────────────
+async function getAllEnums(pool: Pool): Promise<{ type_name: string; enum_values: string[] }[]> {
+  const result = await pool.query(`
+    SELECT t.typname AS type_name, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS enum_values
+    FROM pg_type t
+    JOIN pg_enum e ON t.oid = e.enumtypid
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+    GROUP BY t.typname
+  `);
+  return result.rows;
+};
+
+// ── Private: Get Slow Queries ────────────────
+async function getSlowQueries(pool: Pool): Promise<string[]> {
+  try {
+    const result = await pool.query(`
+      SELECT query, round(total_exec_time::numeric, 2) as total_time, calls, round(mean_exec_time::numeric, 2) as mean_time
+      FROM pg_stat_statements
+      JOIN pg_roles r ON r.oid = userid
+      WHERE calls > 5 AND r.rolname = current_user
+      ORDER BY total_exec_time DESC
+      LIMIT 5
+    `);
+    return result.rows.map((r: any) => `[${r.calls} calls, ${r.mean_time}ms avg] ${r.query.slice(0, 200)}`);
+  } catch (err) {
+    // pg_stat_statements might not be installed or no permission
+    return [];
+  }
 };

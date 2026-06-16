@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import mermaid from 'mermaid';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import ErrorBoundary from './ErrorBoundary';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -147,8 +150,8 @@ const MermaidChart: React.FC<MermaidProps> = ({ chart }) => {
       </div>
 
       {/* Fullscreen Modal Popup Overlay */}
-      {isFullscreen && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-slate-950/95 backdrop-blur-md p-8 animate-in fade-in duration-200">
+      {isFullscreen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex flex-col bg-slate-950/95 backdrop-blur-md p-8 animate-in fade-in duration-200">
           <header className="flex justify-between items-center mb-6">
             <div>
               <h3 className="text-lg font-bold text-white uppercase tracking-wider">Architecture Diagram Viewer</h3>
@@ -163,14 +166,42 @@ const MermaidChart: React.FC<MermaidProps> = ({ chart }) => {
             </button>
           </header>
 
-          <div 
-            className="flex-1 bg-slate-900/30 border border-white/5 rounded-3xl overflow-auto p-12 flex items-center justify-center [&>svg]:max-w-none [&>svg]:w-auto [&>svg]:h-auto [&>svg]:scale-110"
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
-        </div>
+          <div className="flex-1 border border-white/5 rounded-3xl overflow-hidden bg-slate-900/30 relative">
+            <TransformWrapper
+              initialScale={1}
+              minScale={0.1}
+              maxScale={5}
+              centerOnInit={true}
+              wheel={{ step: 0.1 }}
+            >
+              {({ zoomIn, zoomOut, resetTransform }) => (
+                <>
+                  <div className="absolute top-4 left-4 z-10 flex space-x-2 bg-slate-950/80 p-2 rounded-2xl border border-white/10 backdrop-blur-md shadow-2xl">
+                    <button onClick={() => zoomIn()} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all" title="Zoom In"><ZoomIn size={16} /></button>
+                    <button onClick={() => zoomOut()} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all" title="Zoom Out"><ZoomOut size={16} /></button>
+                    <button onClick={() => resetTransform()} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all" title="Reset View"><Move size={16} /></button>
+                  </div>
+                  <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
+                    <div 
+                      className="w-full h-full flex items-center justify-center p-12 [&>svg]:max-w-none [&>svg]:w-auto [&>svg]:h-auto"
+                      dangerouslySetInnerHTML={{ __html: svg }}
+                    />
+                  </TransformComponent>
+                </>
+              )}
+            </TransformWrapper>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 };
 
-export default MermaidChart;
+export default function MermaidChartWrapper(props: MermaidProps) {
+  return (
+    <ErrorBoundary fallback={<div className="text-red-500 text-[11px] font-bold p-4 bg-red-500/5 border border-red-500/10 rounded-xl">⚠️ Schema Diagram rendering failed unexpectedly. Please check syntax.</div>}>
+      <MermaidChart {...props} />
+    </ErrorBoundary>
+  );
+}

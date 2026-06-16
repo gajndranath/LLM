@@ -1,21 +1,23 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { connectionsApi } from '../api/connections.api';
 import { architectApi } from '../api/architect.api';
 import { designStudioApi } from '../api/designStudio.api';
 import { useSchemaExtract } from '../hooks/useSchemaExtract';
-import { useAppContext } from '../context/AppContext';
-import { Sparkles, Database, Loader2, Plus, Wand2, History, MessageSquare, ShieldAlert, Eye, Trash2 } from 'lucide-react';
+import { useWorkspaceStore } from '../store/workspaceStore';
+import { useAuthStore } from '../store/authStore';
+import { Sparkles, Database, Loader2, Plus, Wand2, History, MessageSquare, ShieldAlert, Eye, Trash2, RefreshCw, Cpu } from 'lucide-react';
 import { toast } from 'sonner';
 import DesignStudioChat from '../components/DesignStudioChat';
 import { BlueprintPanel, AuditPanel } from '../components/DesignStudioPanels';
 import TableDataInspector from '../components/TableDataInspector';
+import { io, Socket } from 'socket.io-client';
 
 type Mode = 'new' | 'existing';
 interface Message { role: 'user' | 'atlas'; content: string; };
 
 export default function ArchitectStudio() {
-  const { selectedConnectionId, setSelectedConnectionId } = useAppContext();
+  const { selectedConnectionId, setConnectionId: setSelectedConnectionId, aiProvider, aiModel, setAiConfig } = useWorkspaceStore();
   const queryClient = useQueryClient();
 
   const [mode, setMode] = useState<Mode>('new');
@@ -28,6 +30,7 @@ export default function ArchitectStudio() {
   const [isAuditRunning, setIsAuditRunning] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{ show: boolean, fix: any }>({ show: false, fix: null });
   const [inspectingTable, setInspectingTable] = useState<string | null>(null);
+  const [deployedSessionIds, setDeployedSessionIds] = useState<Set<string>>(new Set());
   const [deleteModal, setDeleteModal] = useState<{
     show: boolean;
     type: 'session' | 'audit' | null;
@@ -39,28 +42,32 @@ export default function ArchitectStudio() {
     id: null,
     title: ''
   });
+  
+  // Socket.io for streaming
+  const socketRef = useRef<Socket | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Fetch schema for the selected connection
   const { data: schema } = useSchemaExtract(selectedConnectionId);
 
-  // Applied Mutations Change Log
   const { data: mutations, refetch: refetchMutations } = useQuery({
-    queryKey: ['schema-mutations', selectedConnectionId],
+    queryKey: ['design-studio-mutations', selectedConnectionId],
     queryFn: async () => {
       if (!selectedConnectionId) return [];
-      const res = await architectApi.getMutations(selectedConnectionId);
+      const res = await designStudioApi.getMutations(selectedConnectionId);
       return res.data || [];
     },
-    enabled: !!selectedConnectionId
+    enabled: !!selectedConnectionId || view === 'changelog'
   });
 
   // Deploy blueprint
   const deployMutation = useMutation({
     mutationFn: (payload: { sessionId: string; connectionId: string }) => designStudioApi.deploySchema(payload),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       toast.success('Blueprint successfully deployed to Live Database!');
+      setDeployedSessionIds(prev => new Set(prev).add(variables.sessionId));
       queryClient.invalidateQueries({ queryKey: ['schema', selectedConnectionId] });
-      queryClient.invalidateQueries({ queryKey: ['schema-mutations', selectedConnectionId] });
+      queryClient.invalidateQueries({ queryKey: ['design-studio-mutations', selectedConnectionId] });
       refetchMutations();
     },
     onError: (err: any) => toast.error(err.message || 'Deployment failed'),
@@ -100,15 +107,27 @@ export default function ArchitectStudio() {
 
   // Rollback mutation
   const rollbackMutation = useMutation({
-    mutationFn: (mutationId: string) => architectApi.rollbackFix(mutationId),
+    mutationFn: (mutationId: string) => designStudioApi.rollbackMutation(mutationId, selectedConnectionId!),
     onSuccess: () => {
       toast.success("Change rolled back successfully! ⏪");
       queryClient.invalidateQueries({ queryKey: ['schema', selectedConnectionId] });
-      queryClient.invalidateQueries({ queryKey: ['schema-mutations', selectedConnectionId] });
+      queryClient.invalidateQueries({ queryKey: ['design-studio-mutations', selectedConnectionId] });
       refetchMutations();
     },
     onError: (err: any) => {
       toast.error(err.message || "Rollback failed");
+    }
+  });
+
+  // Sync Database Cache mutation
+  const syncMutation = useMutation({
+    mutationFn: () => designStudioApi.clearSchemaCache(selectedConnectionId!),
+    onSuccess: () => {
+      toast.success("Database schema cache synchronized! 🔄");
+      queryClient.invalidateQueries({ queryKey: ['schema', selectedConnectionId] });
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to sync cache");
     }
   });
 
@@ -163,25 +182,73 @@ export default function ArchitectStudio() {
     onError: () => toast.error('Session create nahi ho saki'),
   });
 
-  // Send message
-  const probeMutation = useMutation({
-    mutationFn: (payload: { sessionId: string; userMessage: string }) =>
-      designStudioApi.probeSession({ sessionId: payload.sessionId, userMessage: payload.userMessage }),
-    onSuccess: (res) => {
-      const { reply, isReadyToGenerate: ready } = res.data;
-      setMessages(prev => [...prev, { role: 'atlas', content: reply }]);
-      if (ready) setIsReadyToGenerate(true);
-    },
-    onError: (err: any) => toast.error(err.message || 'ATLAS se connect nahi ho saka'),
-  });
+  // Send message via WebSocket
+  const handleSend = (userMsg: string) => {
+    if (!sessionId) return;
+    
+    // 1. Add user message to UI immediately
+    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    
+    // 2. Add an empty ATLAS message to stream into
+    setMessages(prev => [...prev, { role: 'atlas', content: '' }]);
+    setIsStreaming(true);
+
+    // 3. Ensure Socket connection
+    if (!socketRef.current) {
+      // Connect to the backend root (socket.io uses the same host by default or API base URL)
+      const apiUrl = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:3001' : 'https://llm-3qnu.onrender.com');
+      // If VITE_API_URL has /api at the end, remove it for socket.io
+      const socketUrl = apiUrl.replace('/api', '');
+      
+      socketRef.current = io(socketUrl, { withCredentials: true });
+      
+      socketRef.current.on('probe_chunk', (chunk: string) => {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          if (lastMsg.role === 'atlas') {
+            lastMsg.content += chunk;
+          }
+          return newMessages;
+        });
+      });
+
+      socketRef.current.on('probe_end', (data: { isReadyToGenerate: boolean, fullReply: string }) => {
+        setIsStreaming(false);
+        if (data.isReadyToGenerate) setIsReadyToGenerate(true);
+        // Replace the streamed message with the clean cleanReply (removes READY_TO_GENERATE flag)
+        setMessages(prev => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1].content = data.fullReply;
+          return newMessages;
+        });
+        queryClient.invalidateQueries({ queryKey: ['ds-sessions'] });
+      });
+
+      socketRef.current.on('probe_error', (errMsg: string) => {
+        setIsStreaming(false);
+        toast.error(errMsg);
+      });
+    }
+
+    // 4. Emit the event to start the stream
+    const userId = useAuthStore.getState().user?.id || '';
+    socketRef.current.emit('probe_requirements', {
+      sessionId,
+      userId,
+      userMessage: userMsg,
+      provider: aiProvider,
+      model: aiModel
+    });
+  };
 
   // Generate blueprint
   const generateMutation = useMutation({
-    mutationFn: () => designStudioApi.generateSchema(sessionId!),
+    mutationFn: () => designStudioApi.generateSchema({ sessionId: sessionId!, provider: aiProvider, model: aiModel }),
     onSuccess: (res) => {
       setBlueprint(res.data);
       setIsReadyToGenerate(false);
-      toast.success('Blueprint ready hai! 🎉');
+      toast.success('Blueprint is ready! 🎉');
     },
     onError: (err: any) => toast.error(err.message || 'Blueprint generation failed'),
   });
@@ -200,8 +267,8 @@ export default function ArchitectStudio() {
         confirmWrite: true
       });
       queryClient.invalidateQueries({ queryKey: ['schema', selectedConnectionId] });
-      queryClient.invalidateQueries({ queryKey: ['schema-mutations', selectedConnectionId] });
-      refetchMutations();
+      // We don't invalidate design-studio-mutations here because applyFix goes to schema_mutations.
+      // If we merge them later, we will, but for now we're just managing design studio mutations in the UI.
       toast.dismiss();
       toast.success(`Successfully applied: ${fix.title}`);
       setConfirmModal({ show: false, fix: null });
@@ -220,9 +287,10 @@ export default function ArchitectStudio() {
       const response = await designStudioApi.auditExisting({
         connectionId: selectedConnectionId,
         sessionId: activeSessionId!,
+        provider: aiProvider,
+        model: aiModel
       });
       setAudit(response.data);
-      queryClient.invalidateQueries({ queryKey: ['architect-history', selectedConnectionId] });
       toast.success('A-to-Z Audit complete! 🔍');
     } catch (err: any) {
       toast.error(err.message || 'Audit failed');
@@ -231,11 +299,7 @@ export default function ArchitectStudio() {
     }
   };
 
-  const handleSend = (userMsg: string) => {
-    if (!sessionId) return;
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    probeMutation.mutate({ sessionId, userMessage: userMsg });
-  };
+  // Dummy fetch session history removed. Using requirements_transcript from list.
 
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col space-y-4">
@@ -256,7 +320,7 @@ export default function ArchitectStudio() {
                 className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${view === v ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-white'}`}
               >
                 {v === 'chat' ? <MessageSquare size={14} /> : v === 'history' ? <History size={14} /> : <Database size={14} />}
-                <span>{v === 'changelog' ? 'CHANGE LOG' : v.toUpperCase()}</span>
+                <span>{v === 'changelog' ? 'TIME MACHINE' : v.toUpperCase()}</span>
               </button>
             ))}
           </div>
@@ -282,6 +346,41 @@ export default function ArchitectStudio() {
               {connections?.map((c: any) => (
                 <option key={c.id} value={c.id} className="bg-slate-900">{c.name}</option>
               ))}
+            </select>
+            {selectedConnectionId && (
+              <button
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all ml-2"
+                title="Sync Database Schema Cache"
+              >
+                <RefreshCw size={14} className={syncMutation.isPending ? "animate-spin text-blue-400" : ""} />
+              </button>
+            )}
+          </div>
+
+          <div className="glass px-4 py-2.5 rounded-2xl flex items-center space-x-2 min-w-[160px]">
+            <Cpu size={16} className="text-purple-400" />
+            <select
+              className="bg-transparent border-none focus:ring-0 text-sm font-bold w-full text-white cursor-pointer"
+              value={`${aiProvider}|${aiModel}`}
+              onChange={(e) => {
+                const [p, m] = e.target.value.split('|');
+                setAiConfig(p, m);
+              }}
+            >
+              <optgroup label="OpenAI" className="bg-slate-900">
+                <option value="openai|gpt-4o" className="bg-slate-900">GPT-4o (Smart)</option>
+                <option value="openai|gpt-4o-mini" className="bg-slate-900">GPT-4o Mini (Fast)</option>
+              </optgroup>
+              <optgroup label="Groq (Free & Fast)" className="bg-slate-900">
+                <option value="groq|llama-3.3-70b-versatile" className="bg-slate-900">Llama 3.3 70B</option>
+                <option value="groq|mixtral-8x7b-32768" className="bg-slate-900">Mixtral 8x7B</option>
+              </optgroup>
+              <optgroup label="Google" className="bg-slate-900">
+                <option value="gemini|gemini-1.5-pro-latest" className="bg-slate-900">Gemini 1.5 Pro</option>
+                <option value="gemini|gemini-1.5-flash-latest" className="bg-slate-900">Gemini 1.5 Flash</option>
+              </optgroup>
             </select>
           </div>
         </div>
@@ -393,11 +492,10 @@ export default function ArchitectStudio() {
                     <div>
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-xs font-bold text-white leading-snug">{m.title}</span>
-                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ml-2 ${
-                          m.status === 'APPLIED' ? 'bg-emerald-500/10 text-emerald-400' :
-                          m.status === 'ROLLED_BACK' ? 'bg-blue-500/10 text-blue-400' :
-                          'bg-red-500/10 text-red-400'
-                        }`}>{m.status}</span>
+                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ml-2 ${m.status === 'APPLIED' ? 'bg-emerald-500/10 text-emerald-400' :
+                            m.status === 'ROLLED_BACK' ? 'bg-blue-500/10 text-blue-400' :
+                              'bg-red-500/10 text-red-400'
+                          }`}>{m.status}</span>
                       </div>
                       {m.description && <p className="text-[10px] text-slate-400 leading-normal">{m.description}</p>}
                       <p className="text-[8px] text-slate-500 mt-1">{new Date(m.created_at).toLocaleString()}</p>
@@ -470,12 +568,12 @@ export default function ArchitectStudio() {
             <DesignStudioChat
               messages={messages}
               onSendMessage={handleSend}
-              isLoading={probeMutation.isPending}
-              isReadyToGenerate={mode === 'new' && isReadyToGenerate}
+              isLoading={isStreaming}
+              isReadyToGenerate={isReadyToGenerate}
               onGenerate={() => generateMutation.mutate()}
               isGenerating={generateMutation.isPending}
               mode={mode}
-              onApplyAction={(fix: any) => setConfirmModal({ show: true, fix })}
+              onApplyAction={handleExecuteFix}
               onAudit={() => handleAudit()}
               isAuditing={isAuditRunning}
             />
@@ -501,13 +599,24 @@ export default function ArchitectStudio() {
             </div>
           ) : (
             <>
-              {blueprint && <BlueprintPanel 
-                schema={blueprint} 
-                sessionId={sessionId!} 
-                connectionId={selectedConnectionId} 
-                onDeploy={(payload) => deployMutation.mutate(payload)}
-                isDeploying={deployMutation.isPending}
-              />}
+              {blueprint && (() => {
+                const currentSession = sessions?.find((s: any) => s.id === sessionId);
+                const isDeployedViaMutations = mutations?.some((m: any) => 
+                  m.status === 'APPLIED' && m.title === 'Deployed AI Blueprint' && m.description?.includes(sessionId)
+                );
+                const isSessionDeployed = currentSession?.status === 'deployed' || deployedSessionIds.has(sessionId!) || isDeployedViaMutations;
+                
+                return (
+                  <BlueprintPanel
+                    schema={blueprint}
+                    sessionId={sessionId!}
+                    connectionId={selectedConnectionId}
+                    onDeploy={(payload) => deployMutation.mutate(payload)}
+                    isDeploying={deployMutation.isPending}
+                    isDeployed={isSessionDeployed}
+                  />
+                );
+              })()}
               {audit && (
                 <AuditPanel
                   audit={audit}

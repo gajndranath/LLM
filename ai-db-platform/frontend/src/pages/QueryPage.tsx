@@ -4,7 +4,7 @@ import Editor from '@monaco-editor/react';
 import { connectionsApi } from '../api/connections.api';
 import { queryApi } from '../api/query.api';
 import { useSchemaExtract } from '../hooks/useSchemaExtract';
-import { useAppContext } from '../context/AppContext';
+import { useWorkspaceStore } from '../store/workspaceStore';
 import {
   Terminal,
   Play,
@@ -29,7 +29,7 @@ import MermaidChart from '../components/MermaidChart';
 import TableDataInspector from '../components/TableDataInspector';
 
 const QueryPage = () => {
-  const { selectedConnectionId: selectedConn, setSelectedConnectionId: setSelectedConn } = useAppContext();
+  const { selectedConnectionId: selectedConn, setConnectionId: setSelectedConn } = useWorkspaceStore();
   const [naturalQuery, setNaturalQuery] = useState('');
   const [inspectingTable, setInspectingTable] = useState<string | null>(null);
   const [generatedSql, setGeneratedSql] = useState('');
@@ -454,9 +454,19 @@ const QueryPage = () => {
                   {((diagramTab === 'erd' && !insights?.erd_mermaid && !schema?.erd_mermaid) ||
                     (diagramTab === 'dfd' && !insights?.dfd_mermaid && !schema?.dfd_mermaid) ||
                     (diagramTab === 'flow' && !insights?.flow_mermaid)) && (
-                      <div className="h-full flex flex-col items-center justify-center opacity-30 text-center py-20">
-                        <Info size={40} className="mb-4" />
-                        <p className="text-xs font-bold uppercase tracking-[0.2em]">Visualizing System... Please wait</p>
+                      <div className="h-full flex flex-col items-center justify-center opacity-40 text-center py-20">
+                        {isGeneratingInsights ? (
+                          <>
+                            <Loader2 size={40} className="mb-4 animate-spin text-blue-400" />
+                            <p className="text-xs font-bold uppercase tracking-[0.2em]">Visualizing System... Please wait</p>
+                          </>
+                        ) : (
+                          <>
+                            <Info size={40} className="mb-4 text-slate-500" />
+                            <p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">No Diagram Generated</p>
+                            <p className="text-[10px] text-slate-500 mt-2 max-w-xs">The AI did not find enough logical flow in this query to generate a {diagramTab.toUpperCase()} diagram.</p>
+                          </>
+                        )}
                       </div>
                     )}
                 </div>
@@ -650,6 +660,18 @@ const QueryPage = () => {
               <p className="text-slate-400 text-sm leading-relaxed">
                 This query contains database write or mutation statements (INSERT, UPDATE, DELETE, CREATE, ALTER, etc.). Are you sure you want to execute it?
               </p>
+              
+              {confirmWriteModal.sql && /update |delete from /i.test(confirmWriteModal.sql) && !/where /i.test(confirmWriteModal.sql) && (
+                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start space-x-3">
+                  <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={16} />
+                  <div>
+                    <h4 className="text-red-500 font-bold text-sm uppercase tracking-wider mb-1">DANGER: Missing WHERE Clause</h4>
+                    <p className="text-red-400/80 text-xs">
+                      This UPDATE or DELETE statement does not contain a WHERE clause. It will modify or delete ALL rows in the target table.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex flex-col space-y-3 pt-4">
               <button

@@ -167,18 +167,19 @@ export const saveQueryHistory = async (
   );
 };
 
-// ── Helper: Add LIMIT if missing ───────────────────────────
+// ── Helper: Add LIMIT if missing (Subquery Wrapper) ────────
 const addLimitIfMissing = (sql: string, maxRows: number): string => {
   let cleanSql = sql.trim();
-  const normalized = cleanSql.toLowerCase();
-  
-  if (!normalized.startsWith('select')) return sql;
-  if (normalized.includes(' limit ')) return sql;
-
-  // Strip semicolon to allow LIMIT append
   if (cleanSql.endsWith(';')) {
     cleanSql = cleanSql.slice(0, -1);
   }
+  const normalized = cleanSql.toLowerCase();
   
-  return `${cleanSql} LIMIT ${maxRows}`;
+  // Only wrap read queries.
+  // By wrapping in a subquery, we guarantee LIMIT enforcement without breaking complex CTEs or UNIONs.
+  if (normalized.startsWith('select') || normalized.startsWith('with') || normalized.startsWith('table')) {
+    return `SELECT * FROM (${cleanSql}) AS atlas_safe_query LIMIT ${maxRows}`;
+  }
+  
+  return sql;
 };

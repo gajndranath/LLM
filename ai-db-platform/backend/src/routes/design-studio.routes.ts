@@ -55,10 +55,12 @@ const deploySchema = z.object({
 // ── GET /api/design-studio/sessions — List all sessions ──────
 router.get('/sessions', asyncHandler(async (req: Request, res: Response) => {
   const result = await query(
-    `SELECT id, mode, connection_id, status, current_design, created_at, updated_at
-     FROM design_studio_sessions
-     WHERE user_id = $1
-     ORDER BY updated_at DESC
+    `SELECT dss.id, dss.mode, dss.connection_id, dss.status, dss.current_design, dss.created_at, dss.updated_at,
+      (SELECT COALESCE(json_agg(json_build_object('role', sm.role, 'content', sm.content) ORDER BY sm.created_at ASC), '[]'::json)
+       FROM session_messages sm WHERE sm.session_id = dss.id) AS requirements_transcript
+     FROM design_studio_sessions dss
+     WHERE dss.user_id = $1
+     ORDER BY dss.updated_at DESC
      LIMIT 20`,
     [req.user!.userId]
   );
@@ -81,7 +83,7 @@ router.post('/sessions', studioRateLimiter, validateRequest(createSessionSchema)
 
 // ── POST /api/design-studio/probe — AI asks requirements questions ─
 router.post('/probe', studioRateLimiter, checkLLMQueryLimit, validateRequest(probeSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { sessionId, userMessage } = req.body;
+  const { sessionId, userMessage, provider, model } = req.body;
 
   // Load session + existing transcript + connection_id
   const sessionResult = await query(
@@ -118,12 +120,21 @@ router.post('/probe', studioRateLimiter, checkLLMQueryLimit, validateRequest(pro
     .map((msg: { role: string; content: string }) => `${msg.role === 'user' ? 'User' : 'ATLAS'}: ${msg.content}`)
     .join('\n');
 
-  // Call AI service for probing response
-  const aiResponse = await aiClient.post('/design-studio/probe-requirements', {
-    user_input: userMessage,
-    conversation_context: conversationContext,
-    schema_context: schemaContext, // Pass the "Eyes" of the architect
-  });
+  let aiResponse;
+  try {
+    aiResponse = await aiClient.post('/design-studio/probe-requirements', {
+      user_input: userMessage,
+      conversation_context: conversationContext,
+      schema_context: schemaContext,
+      provider,
+      model
+    });
+  } catch (err: any) {
+    if (err.response && err.response.status) {
+      throw new ApiError(err.response.status, err.response.data?.detail || err.message);
+    }
+    throw err;
+  }
 
   const atlasReply: string = aiResponse.data.probes;
   const isReady = atlasReply.includes('READY_TO_GENERATE');
@@ -157,9 +168,9 @@ router.post('/probe', studioRateLimiter, checkLLMQueryLimit, validateRequest(pro
   );
 }));
 
-// ── POST /api/design-studio/generate-schema — Build full blueprint ─
+// ── POST /api/design-studio/generate-schema — Run Step 1 (Schema Generation) ──
 router.post('/generate-schema', studioRateLimiter, checkLLMQueryLimit, validateRequest(generateSchemaSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { sessionId } = req.body;
+  const { sessionId, provider, model } = req.body;
 
   const sessionResult = await query(
     `SELECT id FROM design_studio_sessions
@@ -174,8 +185,8 @@ router.post('/generate-schema', studioRateLimiter, checkLLMQueryLimit, validateR
     `SELECT role, content FROM session_messages WHERE session_id = $1 ORDER BY created_at ASC`,
     [sessionId]
   );
-  const transcript = transcriptResult.rows;
-  const conversationTranscript = transcript
+  const transcript = transcriptResult.rows
+  const conversationTranscript = transcriptResult.rows
     .map((m: { role: string; content: string }) => `${m.role === 'user' ? 'User' : 'ATLAS'}: ${m.content}`)
     .join('\n');
 
@@ -183,13 +194,17 @@ router.post('/generate-schema', studioRateLimiter, checkLLMQueryLimit, validateR
   try {
     aiResponse = await aiClient.post('/design-studio/generate-schema', {
       conversation_transcript: conversationTranscript,
+      provider,
+      model
     });
   } catch (err: any) {
-    const detail = err.response?.data?.detail || err.message;
-    console.error("AI Service Error:", detail);
-    throw new ApiError(500, `AI Schema Generation Failed: ${detail}`);
+    if (err.response && err.response.status) {
+      throw new ApiError(err.response.status, err.response.data?.detail || err.message);
+    }
+    throw err;
   }
 
+  const generatedDesign = aiResponse.data.schema;
   const schema = aiResponse.data.schema;
 
   // Save the generated design
@@ -245,14 +260,17 @@ router.post('/deploy', studioRateLimiter, validateRequest(deploySchema), asyncHa
             (_match: string, extName: string) => `CREATE EXTENSION IF NOT EXISTS "${extName}"`)
           // Fix double-escaped newlines from JSON serialization
           .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t');
+          .replace(/\\t/g, '\t')
+          .trim();
 
-        await client.query(sanitizedSql);
-        combinedSqlExecuted += `${sanitizedSql}\n\n`;
-        
-        // Accumulate rollbacks in reverse order (LIFO)
-        if (script.rollback_sql) {
-          combinedRollbackSql = `${script.rollback_sql}\n\n` + combinedRollbackSql;
+        if (sanitizedSql.length > 0) {
+          await client.query(sanitizedSql);
+          combinedSqlExecuted += `${sanitizedSql}\n\n`;
+          
+          // Accumulate rollbacks in reverse order (LIFO)
+          if (script.rollback_sql && script.rollback_sql.trim().length > 0) {
+            combinedRollbackSql = `${script.rollback_sql.trim()}\n\n` + combinedRollbackSql;
+          }
         }
       }
     }
@@ -272,9 +290,9 @@ router.post('/deploy', studioRateLimiter, validateRequest(deploySchema), asyncHa
       ]
     );
 
-    // 5. Update session connection_id if it was null
+    // 5. Update session connection_id and mark as deployed
     await query(
-      `UPDATE design_studio_sessions SET connection_id = $1 WHERE id = $2`,
+      `UPDATE design_studio_sessions SET connection_id = $1, status = 'deployed' WHERE id = $2`,
       [connectionId, sessionId]
     );
 
@@ -290,20 +308,104 @@ router.post('/deploy', studioRateLimiter, validateRequest(deploySchema), asyncHa
   }
 }));
 
-// ── POST /api/design-studio/audit-existing — Full A-to-Z audit ──
+// ── GET /api/design-studio/mutations — Fetch deployment history ──
+router.get('/mutations', asyncHandler(async (req: Request, res: Response) => {
+  const { connectionId } = req.query;
+  if (!connectionId) {
+    throw new ApiError(400, 'connectionId query parameter is required');
+  }
+
+  const result = await query(
+    `SELECT id, title, description, sql_executed, rollback_sql, created_at, status 
+     FROM architect_mutations 
+     WHERE user_id = $1 AND connection_id = $2
+     ORDER BY created_at DESC`,
+    [req.user!.userId, connectionId]
+  );
+
+  return res.json(new ApiResponse(200, result.rows, 'Mutations fetched successfully'));
+}));
+
+// ── POST /api/design-studio/mutations/:id/rollback — Undo a deployment ──
+router.post('/mutations/:id/rollback', studioRateLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { connectionId } = req.body;
+
+  if (!connectionId) {
+    throw new ApiError(400, 'connectionId is required in the body');
+  }
+
+  // 1. Fetch the mutation
+  const mutationResult = await query(
+    `SELECT * FROM architect_mutations WHERE id = $1 AND user_id = $2`,
+    [id, req.user!.userId]
+  );
+
+  if (mutationResult.rows.length === 0) {
+    throw new ApiError(404, 'Mutation not found');
+  }
+
+  const mutation = mutationResult.rows[0];
+
+  if (mutation.status === 'REVERTED') {
+    throw new ApiError(400, 'Mutation is already reverted');
+  }
+
+  if (!mutation.rollback_sql || mutation.rollback_sql.trim() === '') {
+    throw new ApiError(400, 'No rollback SQL exists for this mutation');
+  }
+
+  // 2. Connect to the target DB
+  const targetPool = await getConnectionPool(connectionId, req.user!.userId);
+  const client = await targetPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // 3. Execute rollback SQL
+    await client.query(mutation.rollback_sql);
+
+    // 4. Mark as REVERTED
+    await query(
+      `UPDATE architect_mutations SET status = 'REVERTED', updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    await client.query('COMMIT');
+
+    return res.json(new ApiResponse(200, null, 'Rollback successful! Database restored.'));
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error("Rollback failed:", err);
+    throw new ApiError(500, `Rollback failed at runtime: ${err.message}`);
+  } finally {
+    client.release();
+  }
+}));
+
+// ── POST /api/design-studio/audit-existing — Deep Audit Mode ──
 router.post('/audit-existing', studioRateLimiter, checkLLMQueryLimit, validateRequest(auditExistingSchema), asyncHandler(async (req: Request, res: Response) => {
-  const { sessionId, connectionId, userConcerns } = req.body;
+  const { sessionId, connectionId, userConcerns, provider, model } = req.body;
 
   // Pull the live schema from user's database
   const pool = await getConnectionPool(connectionId, req.user!.userId);
   const schema = await extractSchema(pool, connectionId);
   const schemaText = formatSchemaForPrompt(schema);
 
-  // Call the senior audit
-  const aiResponse = await aiClient.post('/design-studio/audit-senior-level', {
-    schema: schemaText,
-    user_concerns: userConcerns || '',
-  });
+  let aiResponse;
+  try {
+    aiResponse = await aiClient.post('/design-studio/audit-senior-level', {
+      schema: schemaText,
+      user_concerns: userConcerns || '',
+      provider,
+      model
+    });
+  } catch (err: any) {
+    if (err.response && err.response.status) {
+      throw new ApiError(err.response.status, err.response.data?.detail || err.message);
+    }
+    throw err;
+  }
 
   const auditResult = aiResponse.data.audit;
 
@@ -373,6 +475,23 @@ router.delete('/sessions/:id', asyncHandler(async (req: Request, res: Response) 
     throw new ApiError(404, 'Session not found');
   }
   return res.json(new ApiResponse(200, null, 'Session deleted successfully'));
+}));
+
+// ── DELETE /api/design-studio/schema-cache — Manual Cache Invalidation ──
+router.delete('/schema-cache', asyncHandler(async (req: Request, res: Response) => {
+  const { connectionId } = req.query;
+  if (!connectionId) {
+    throw new ApiError(400, 'connectionId is required');
+  }
+
+  const { getRedisStatus, redisClient } = require('../config/redis');
+  
+  if (getRedisStatus()) {
+    const cacheKey = `schema:cache:${connectionId}`;
+    await redisClient.del(cacheKey);
+  }
+
+  return res.json(new ApiResponse(200, null, 'Schema cache successfully invalidated'));
 }));
 
 export default router;

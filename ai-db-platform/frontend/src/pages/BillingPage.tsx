@@ -199,7 +199,7 @@ const BillingPage = () => {
               </div>
 
               <div className="space-y-3 mb-8 flex-1">
-                {plan.features.map((feature, i) => (
+                {plan.features.map((feature: string, i: number) => (
                   <div key={i} className="flex items-start space-x-2">
                     <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
                     <span className="text-sm text-slate-300">{feature}</span>

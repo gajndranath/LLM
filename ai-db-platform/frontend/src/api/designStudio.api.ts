@@ -17,13 +17,13 @@ export const designStudioApi = {
     return data;
   },
 
-  probeSession: async (payload: { sessionId: string; userMessage: string }): Promise<ApiResponse<any>> => {
+  probeSession: async (payload: { sessionId: string; userMessage: string; provider?: string; model?: string }): Promise<ApiResponse<any>> => {
     const { data } = await api.post('/design-studio/probe', payload);
     return data;
   },
 
-  generateSchema: async (sessionId: string): Promise<ApiResponse<any>> => {
-    const { data } = await api.post('/design-studio/generate-schema', { sessionId });
+  generateSchema: async (payload: { sessionId: string; provider?: string; model?: string }): Promise<ApiResponse<any>> => {
+    const { data } = await api.post('/design-studio/generate-schema', payload);
     return data;
   },
 
@@ -32,8 +32,23 @@ export const designStudioApi = {
     return data;
   },
 
-  auditExisting: async (payload: { sessionId?: string | null; connectionId: string; userConcerns?: string | null }): Promise<ApiResponse<any>> => {
+  auditExisting: async (payload: { sessionId?: string | null; connectionId: string; userConcerns?: string | null; provider?: string; model?: string }): Promise<ApiResponse<any>> => {
     const { data } = await api.post('/design-studio/audit-existing', payload);
+    return data;
+  },
+
+  clearSchemaCache: async (connectionId: string): Promise<ApiResponse<null>> => {
+    const { data } = await api.delete(`/design-studio/schema-cache?connectionId=${connectionId}`);
+    return data;
+  },
+
+  getMutations: async (connectionId: string): Promise<ApiResponse<any[]>> => {
+    const { data } = await api.get(`/design-studio/mutations?connectionId=${connectionId}`);
+    return data;
+  },
+
+  rollbackMutation: async (mutationId: string, connectionId: string): Promise<ApiResponse<null>> => {
+    const { data } = await api.post(`/design-studio/mutations/${mutationId}/rollback`, { connectionId });
     return data;
   },
 };

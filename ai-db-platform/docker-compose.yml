@@ -1,94 +1,45 @@
-version: '3.9'
+version: '3.8'
 
 services:
-  postgres:
-    image: postgis/postgis:15-3.3
-    container_name: aidb_postgres
-    environment:
-      POSTGRES_DB: ai_db_platform
-      POSTGRES_USER: aidbuser
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev123}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+  # The unified reverse proxy acting as the main entrypoint
+  nginx:
+    image: nginx:alpine
+    container_name: atlas_nginx
     ports:
-      - '5432:5432'
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U aidbuser -d ai_db_platform']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: aidb_redis
-    ports:
-      - '6379:6379'
+      - "80:80"
     volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    container_name: aidb_backend
-    env_file: ./backend/.env
-    environment:
-      - NODE_ENV=development
-      - POSTGRES_HOST=postgres
-      - REDIS_URL=redis://redis:6379
-    ports:
-      - '3001:3001'
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: npm run dev
-
-  ai-service:
-    build:
-      context: ./ai-service
-      dockerfile: Dockerfile.dev
-    container_name: aidb_ai_service
-    env_file: ./ai-service/.env
-    environment:
-      - POSTGRES_HOST=postgres
-      - REDIS_URL=redis://redis:6379
-    ports:
-      - '8000:8000'
-    volumes:
-      - ./ai-service:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - frontend
+      - backend
+      - ai-service
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
-    container_name: aidb_frontend
+      dockerfile: Dockerfile
+    container_name: atlas_frontend
     environment:
-      - VITE_API_URL=http://localhost:3001
-      - VITE_WS_URL=ws://localhost:3001
-    ports:
-      - '3000:3000'
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
-    command: npm run dev -- --host 0.0.0.0
-
-volumes:
-  postgres_data:
-  redis_data:
+      - VITE_API_URL=/api
+    # It exposes 80 internally, nginx routes traffic to it.
+    
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atlas_backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+      - FRONTEND_URL=http://localhost
+    # Nginx routes /api/ to backend:3001
+    
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: atlas_ai_service
+    env_file:
+      - ./ai-service/.env
+    # Nginx routes /ai/ to ai-service:8000

@@ -3,19 +3,53 @@ import { CheckCircle2, AlertTriangle, ShieldAlert, Zap, Loader2, ChevronDown, Ch
 import { toast } from 'sonner';
 import MermaidChart from './MermaidChart';
 
+const buildMermaidFromJson = (visualJson: any, entities: any[] = []) => {
+  if (!visualJson || !visualJson.nodes || !visualJson.edges) return '';
+  
+  let chart = 'erDiagram\n';
+  
+  visualJson.nodes.forEach((node: any) => {
+    chart += `  ${node.id} {\n`;
+    
+    // Attempt to enrich with fields if we have the entity data
+    const entity = entities.find(e => e.name.toLowerCase() === node.id.toLowerCase());
+    if (entity && entity.fields) {
+      entity.fields.forEach((f: any) => {
+        // basic sanitize for mermaid field
+        const safeType = f.type.split(' ')[0].replace(/[^a-zA-Z0-9_]/g, '');
+        const safeCol = f.column.replace(/[^a-zA-Z0-9_]/g, '');
+        chart += `    ${safeType} ${safeCol}\n`;
+      });
+    } else {
+      chart += `    string id\n`; // fallback
+    }
+    chart += `  }\n`;
+  });
+  
+  visualJson.edges.forEach((edge: any) => {
+    const rel = edge.relationship_type === 'one-to-one' ? '||--||' : 
+                edge.relationship_type === 'many-to-many' ? '}o--o{' : '||--o{';
+    chart += `  ${edge.source} ${rel} ${edge.target} : "${edge.label || ''}"\n`;
+  });
+  
+  return chart;
+};
+
 // ── Blueprint Panel (New DB mode result) ─────────────────────
 export function BlueprintPanel({ 
   schema, 
   sessionId, 
   connectionId, 
   onDeploy, 
-  isDeploying 
+  isDeploying,
+  isDeployed
 }: { 
   schema: any; 
   sessionId?: string; 
   connectionId?: string | null; 
   onDeploy?: (payload: { sessionId: string; connectionId: string }) => void;
   isDeploying?: boolean;
+  isDeployed?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<'entities' | 'erd' | 'sql' | 'notes'>('entities');
   const [expandedEntity, setExpandedEntity] = useState<string | null>(null);
@@ -92,7 +126,13 @@ export function BlueprintPanel({
         {/* ERD tab */}
         {activeTab === 'erd' && (
           <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
-            {schema.erd_mermaid ? <MermaidChart chart={schema.erd_mermaid} /> : <p className="text-slate-500 text-sm text-center py-8">No ERD generated</p>}
+            {schema.visual_json ? (
+              <MermaidChart chart={buildMermaidFromJson(schema.visual_json, schema.entities)} />
+            ) : schema.erd_mermaid ? (
+              <MermaidChart chart={schema.erd_mermaid} />
+            ) : (
+              <p className="text-slate-500 text-sm text-center py-8">No ERD generated</p>
+            )}
           </div>
         )}
 
@@ -120,6 +160,14 @@ export function BlueprintPanel({
                   <div className="w-full py-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl text-[10px] font-bold text-center uppercase tracking-widest">
                     ⚠️ Select a Database Connection at the top to Deploy
                   </div>
+                ) : isDeployed ? (
+                  <button
+                    disabled
+                    className="w-full py-3 bg-emerald-600/20 text-emerald-500 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] flex items-center justify-center space-x-2 border border-emerald-500/20 cursor-not-allowed opacity-80"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Deployed to Live Database</span>
+                  </button>
                 ) : (
                   <button
                     onClick={() => {
