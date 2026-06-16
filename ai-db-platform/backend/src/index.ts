@@ -180,7 +180,8 @@ app.get('/api/health', async (req: Request, res: Response) => {
 
 // ── Maintenance Mode Middleware ────────────────────────────────
 app.use(async (req: Request, res: Response, next: NextFunction) => {
-  const allowedMaintenancePaths = [
+  // Always allow: auth routes, maintenance check/toggle, all GET requests (read-only)
+  const alwaysAllowed = [
     '/api/auth/login',
     '/api/auth/me',
     '/api/auth/refresh',
@@ -189,7 +190,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     '/api/super-admin/maintenance/toggle'
   ];
 
-  if (allowedMaintenancePaths.includes(req.path)) {
+  if (alwaysAllowed.includes(req.path) || req.method === 'GET') {
     return next();
   }
 

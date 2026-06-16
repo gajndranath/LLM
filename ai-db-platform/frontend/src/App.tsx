@@ -16,11 +16,15 @@ import InviteAcceptPage from './pages/InviteAcceptPage';
 import LandingPage from './pages/LandingPage';
 import MaintenancePage from './pages/MaintenancePage';
 import MainLayout from './layouts/MainLayout';
+import { useMaintenanceSocket } from './hooks/useMaintenanceSocket';
 
 function App() {
   const { isAuthenticated, isInitialized, user, setAuth, logout } = useAuthStore();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+
+  // Real-time maintenance mode listener via Socket.io
+  useMaintenanceSocket();
 
   useEffect(() => {
     const initAuth = async () => {

@@ -16,6 +16,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiResponse } from '../utils/ApiResponse';
 import { ApiError } from '../utils/ApiError';
 import { validateRequest } from '../middleware/validation.middleware';
+import { io } from '../index';
 
 const router = Router();
 
@@ -253,6 +254,9 @@ router.post('/maintenance/toggle', asyncHandler(async (req: Request, res: Respon
   const currentStatus = await redisClient.get('system:maintenance_mode');
   const newStatus = currentStatus === 'true' ? 'false' : 'true';
   await redisClient.set('system:maintenance_mode', newStatus);
+
+  // Broadcast maintenance state change to ALL connected clients in real-time
+  io.emit('maintenance_toggle', { isMaintenance: newStatus === 'true' });
   
   return res.status(200).json(new ApiResponse(200, { isMaintenance: newStatus === 'true' }, `Maintenance mode turned ${newStatus === 'true' ? 'ON' : 'OFF'}`));
 }));
