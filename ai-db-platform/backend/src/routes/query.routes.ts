@@ -196,10 +196,19 @@ router.get('/history', asyncHandler(async (req: Request, res: Response) => {
   const offsetVal = Math.max(parseInt(offset as string) || 0, 0);
 
   let queryText = `
-    SELECT id, connection_id, natural_query, generated_sql, executed,
-           row_count, execution_ms, had_error, warnings, provider, model, created_at
-    FROM query_history
-    WHERE user_id = $1
+    SELECT qh.id, qh.connection_id, qh.natural_query, qh.generated_sql, qh.executed,
+           qh.row_count, qh.execution_ms, qh.had_error, qh.warnings, qh.provider, qh.model,
+           qh.created_at, u.name AS run_by_name
+    FROM query_history qh
+    JOIN users u ON u.id = qh.user_id
+    WHERE (
+      qh.user_id = $1
+      OR qh.user_id IN (
+        SELECT u2.id FROM users u1
+        JOIN users u2 ON u1.organization_id = u2.organization_id
+        WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+      )
+    )
   `;
   const params: unknown[] = [req.user!.userId];
 

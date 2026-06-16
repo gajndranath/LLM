@@ -158,6 +158,20 @@ router.get('/me', authenticate, asyncHandler(async (req: Request, res: Response)
   );
 }));
 
+// GET /api/auth/maintenance-status — ANY logged-in user can check maintenance state
+router.get('/maintenance-status', authenticate, asyncHandler(async (_req: Request, res: Response) => {
+  let isMaintenance = false;
+  try {
+    const { getRedisStatus, redisClient } = await import('../config/redis');
+    if (getRedisStatus()) {
+      const status = await redisClient.get('system:maintenance_mode');
+      isMaintenance = status === 'true';
+    }
+  } catch { /* ignore */ }
+  return res.status(200).json(new ApiResponse(200, { isMaintenance }, 'Maintenance status fetched'));
+}));
+
+
 // POST /api/auth/register-org — Organization (company) self-registration
 const registerOrgSchema = z.object({
   companyName: z.string().min(2, 'Company name must be at least 2 characters').max(255),

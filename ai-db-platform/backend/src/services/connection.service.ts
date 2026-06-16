@@ -61,14 +61,22 @@ export const createConnection = async (
   return result.rows[0];
 };
 
-// ── List Connections ───────────────────────────────────────
+// ── List Connections (Org-level: all members see all org connections) ───────
 export const listConnections = async (userId: string): Promise<ConnectionRow[]> => {
   const result = await query(
-    `SELECT id, user_id, name, host, port, database_name, username,
-            ssl_enabled, is_active, last_tested_at, last_test_ok, created_at
-     FROM db_connections
-     WHERE user_id = $1 AND is_active = true
-     ORDER BY created_at DESC`,
+    `SELECT dc.id, dc.user_id, dc.name, dc.host, dc.port, dc.database_name, dc.username,
+            dc.ssl_enabled, dc.is_active, dc.last_tested_at, dc.last_test_ok, dc.created_at
+     FROM db_connections dc
+     WHERE dc.is_active = true
+       AND (
+         dc.user_id = $1
+         OR dc.user_id IN (
+           SELECT u2.id FROM users u1
+           JOIN users u2 ON u1.organization_id = u2.organization_id
+           WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+         )
+       )
+     ORDER BY dc.created_at DESC`,
     [userId]
   );
   return result.rows;
@@ -232,13 +240,24 @@ export const updateConnection = async (
 };
 
 // ── Private helpers ────────────────────────────────────────
+// Allows the owner OR any org member to access a connection
 const getConnectionRow = async (connectionId: string, userId: string) => {
   const result = await query(
-    `SELECT id, host, port, database_name, username, password_enc, ssl_enabled
-     FROM db_connections
-     WHERE id = $1 AND user_id = $2 AND is_active = true`,
+    `SELECT dc.id, dc.host, dc.port, dc.database_name, dc.username, dc.password_enc, dc.ssl_enabled
+     FROM db_connections dc
+     WHERE dc.id = $1
+       AND dc.is_active = true
+       AND (
+         dc.user_id = $2
+         OR dc.user_id IN (
+           SELECT u2.id FROM users u1
+           JOIN users u2 ON u1.organization_id = u2.organization_id
+           WHERE u1.id = $2 AND u1.organization_id IS NOT NULL
+         )
+       )`,
     [connectionId, userId]
   );
   if (result.rows.length === 0) throw new ApiError(404, 'Connection not found or unauthorized');
   return result.rows[0];
 };
+

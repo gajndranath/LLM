@@ -20,10 +20,19 @@ router.get('/active', asyncHandler(async (req: Request, res: Response) => {
   const { connectionId } = req.query;
   
   let queryText = `
-    SELECT m.*, c.name as connection_name 
+    SELECT m.*, c.name as connection_name, u.name AS created_by_name
     FROM architect_missions m
     JOIN db_connections c ON m.connection_id = c.id
-    WHERE m.user_id = $1 AND m.status != 'CANCELLED'
+    JOIN users u ON u.id = m.user_id
+    WHERE m.status != 'CANCELLED'
+      AND (
+        m.user_id = $1
+        OR m.user_id IN (
+          SELECT u2.id FROM users u1
+          JOIN users u2 ON u1.organization_id = u2.organization_id
+          WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+        )
+      )
   `;
   const params: any[] = [req.user!.userId];
 

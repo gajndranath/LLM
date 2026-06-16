@@ -186,6 +186,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     '/api/auth/me',
     '/api/auth/refresh',
     '/api/auth/logout',
+    '/api/auth/maintenance-status',       // Any logged-in user can check status
     '/api/super-admin/maintenance',
     '/api/super-admin/maintenance/toggle'
   ];

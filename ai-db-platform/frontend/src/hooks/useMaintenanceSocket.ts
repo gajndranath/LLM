@@ -40,7 +40,8 @@ export function useMaintenanceSocket() {
 
     const checkInitialMaintenance = async () => {
       try {
-        const res = await api.get('/super-admin/maintenance');
+        // Use the dedicated route accessible to all authenticated users
+        const res = await api.get('/auth/maintenance-status');
         const isMaintenance = res.data?.data?.isMaintenance;
         if (isMaintenance && location.pathname !== '/maintenance') {
           navigate('/maintenance', { replace: true });

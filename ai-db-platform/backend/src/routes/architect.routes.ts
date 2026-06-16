@@ -111,10 +111,18 @@ router.get('/history', requireMinRole('ANALYST'), asyncHandler(async (req: Reque
   const { connectionId } = req.query;
   
   let queryText = `
-    SELECT a.*, c.name as connection_name 
+    SELECT a.*, c.name as connection_name, u.name AS performed_by_name
     FROM architect_audits a
     JOIN db_connections c ON a.connection_id = c.id
-    WHERE a.user_id = $1
+    JOIN users u ON u.id = a.user_id
+    WHERE (
+      a.user_id = $1
+      OR a.user_id IN (
+        SELECT u2.id FROM users u1
+        JOIN users u2 ON u1.organization_id = u2.organization_id
+        WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+      )
+    )
   `;
   const params: any[] = [req.user!.userId];
 
@@ -232,10 +240,20 @@ router.get('/mutations', requireMinRole('ANALYST'), asyncHandler(async (req: Req
   }
 
   const result = await query(
-    `SELECT id, connection_id, title, description, sql_executed, rollback_sql, status, created_at
-     FROM schema_mutations
-     WHERE user_id = $1 AND connection_id = $2
-     ORDER BY created_at DESC`,
+    `SELECT sm.id, sm.connection_id, sm.title, sm.description, sm.sql_executed,
+            sm.rollback_sql, sm.status, sm.created_at, u.name AS applied_by_name
+     FROM schema_mutations sm
+     JOIN users u ON u.id = sm.user_id
+     WHERE sm.connection_id = $2
+       AND (
+         sm.user_id = $1
+         OR sm.user_id IN (
+           SELECT u2.id FROM users u1
+           JOIN users u2 ON u1.organization_id = u2.organization_id
+           WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+         )
+       )
+     ORDER BY sm.created_at DESC`,
     [req.user!.userId, connectionId]
   );
 
@@ -243,6 +261,7 @@ router.get('/mutations', requireMinRole('ANALYST'), asyncHandler(async (req: Req
     new ApiResponse(200, result.rows, "Schema mutations fetched")
   );
 }));
+
 
 // POST /api/architect/rollback-fix — Rollback an applied schema fix
 router.post('/rollback-fix', requireMinRole('ADMIN'), architectRateLimiter, validateRequest(rollbackFixSchema), asyncHandler(async (req: Request, res: Response) => {

@@ -56,10 +56,19 @@ const deploySchema = z.object({
 router.get('/sessions', asyncHandler(async (req: Request, res: Response) => {
   const result = await query(
     `SELECT dss.id, dss.mode, dss.connection_id, dss.status, dss.current_design, dss.created_at, dss.updated_at,
+      u.name AS created_by_name,
       (SELECT COALESCE(json_agg(json_build_object('role', sm.role, 'content', sm.content) ORDER BY sm.created_at ASC), '[]'::json)
        FROM session_messages sm WHERE sm.session_id = dss.id) AS requirements_transcript
      FROM design_studio_sessions dss
-     WHERE dss.user_id = $1
+     JOIN users u ON u.id = dss.user_id
+     WHERE (
+       dss.user_id = $1
+       OR dss.user_id IN (
+         SELECT u2.id FROM users u1
+         JOIN users u2 ON u1.organization_id = u2.organization_id
+         WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+       )
+     )
      ORDER BY dss.updated_at DESC
      LIMIT 20`,
     [req.user!.userId]
@@ -316,10 +325,20 @@ router.get('/mutations', asyncHandler(async (req: Request, res: Response) => {
   }
 
   const result = await query(
-    `SELECT id, title, description, sql_executed, rollback_sql, created_at, status 
-     FROM architect_mutations 
-     WHERE user_id = $1 AND connection_id = $2
-     ORDER BY created_at DESC`,
+    `SELECT dsm.id, dsm.title, dsm.description, dsm.sql_executed, dsm.rollback_sql,
+            dsm.created_at, dsm.status, u.name AS applied_by_name
+     FROM architect_mutations dsm
+     JOIN users u ON u.id = dsm.user_id
+     WHERE dsm.connection_id = $2
+       AND (
+         dsm.user_id = $1
+         OR dsm.user_id IN (
+           SELECT u2.id FROM users u1
+           JOIN users u2 ON u1.organization_id = u2.organization_id
+           WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+         )
+       )
+     ORDER BY dsm.created_at DESC`,
     [req.user!.userId, connectionId]
   );
 
