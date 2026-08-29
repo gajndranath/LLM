@@ -101,14 +101,14 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="space-y-10">
-      <header className="flex justify-between items-end">
+    <div className="space-y-8 md:space-y-10">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Platform Overview</h2>
-          <p className="text-slate-400 mt-2 font-medium">Monitoring your database architecture ecosystem</p>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Platform Overview</h2>
+          <p className="text-slate-400 mt-1 sm:mt-2 text-sm sm:text-base font-medium">Monitoring your database architecture ecosystem</p>
         </div>
-        <Link to="/connections" className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-bold flex items-center space-x-2 transition-all shadow-lg shadow-blue-600/20 active:scale-95">
-          <Plus size={20} />
+        <Link to="/connections" className="w-full sm:w-auto justify-center bg-blue-600 hover:bg-blue-500 text-white px-5 sm:px-6 py-2.5 sm:py-3 rounded-2xl font-bold flex items-center space-x-2 transition-all shadow-lg shadow-blue-600/20 active:scale-95 text-sm sm:text-base">
+          <Plus size={18} />
           <span>New Connection</span>
         </Link>
       </header>
