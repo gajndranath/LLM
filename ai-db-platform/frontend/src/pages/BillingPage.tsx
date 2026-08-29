@@ -120,7 +120,6 @@ const BillingPage = () => {
   }
 
   const currentPlan = billingInfo?.organization?.plan || 'free';
-  const orgName = billingInfo?.organization?.name;
   const nextBillingDate = billingInfo?.nextBillingDate ? new Date(billingInfo.nextBillingDate).toLocaleDateString() : null;
   const transactions = billingInfo?.transactions || [];
 
@@ -129,8 +128,8 @@ const BillingPage = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-black text-white tracking-tight">Billing & Subscriptions</h1>
-          <p className="text-slate-400 text-sm mt-1">Manage enterprise plan & tax invoices for {orgName || 'your organization'}</p>
+          <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Billing & Subscriptions</h1>
+          <p className="text-slate-400 text-sm mt-1">Manage enterprise tier, credits, and active subscription</p>
         </div>
       </div>
 
@@ -264,13 +263,13 @@ const BillingPage = () => {
               <button
                 onClick={() => handleUpgrade(plan.id)}
                 disabled={isCurrent}
-                className={`w-full py-3.5 rounded-xl font-bold transition-all ${
+                className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${
                   isCurrent
-                    ? 'bg-white/5 text-slate-500 cursor-not-allowed'
-                    : 'bg-white text-black hover:bg-slate-200 active:scale-95'
+                    ? 'bg-white/5 text-slate-500 border border-white/10 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-blue-500/25 cursor-pointer'
                 }`}
               >
-                {isCurrent ? 'Current Plan' : `Upgrade to ${plan.name}`}
+                {isCurrent ? 'Current Active Tier' : `Upgrade to ${plan.name}`}
               </button>
             </div>
           );
