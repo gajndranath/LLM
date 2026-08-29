@@ -147,7 +147,7 @@ const LandingPage = () => {
 
             {/* Lead Architect Attribution */}
             <a
-              href="https://www.linkedin.com/in/gajendra-nath-tripathi"
+              href="https://www.linkedin.com/in/gajndra/"
               target="_blank"
               rel="noreferrer noopener"
               className="mt-8 inline-flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/30 rounded-2xl px-5 py-3 shadow-xl backdrop-blur-md transition-all active:scale-95 group text-left"
