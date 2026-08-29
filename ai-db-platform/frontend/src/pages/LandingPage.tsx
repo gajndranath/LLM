@@ -129,20 +129,12 @@ const LandingPage = () => {
           {/* ── Trusted By & Engineering Endorsement ── */}
           <div className="mt-16 pt-10 border-t border-white/5">
             <p className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-6 font-bold">
-              Trusted by Engineers & Tech Leads Across High-Growth Teams
+              Engineering Heritage & Enterprise Trust
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 opacity-70 hover:opacity-100 transition-opacity">
-              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
+            <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14">
+              <div className="flex items-center space-x-2.5 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-200 font-bold text-sm tracking-wider shadow-lg">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
                 <span>GALAS IT SOLUTIONS</span>
-              </div>
-              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span>FIRETECH ENTERPRISES</span>
-              </div>
-              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
-                <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-                <span>NEON CLOUD PARTNERS</span>
               </div>
             </div>
 
