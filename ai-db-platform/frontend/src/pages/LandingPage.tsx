@@ -132,27 +132,41 @@ const LandingPage = () => {
               Engineering Heritage & Enterprise Trust
             </p>
             <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14">
-              <div className="flex items-center space-x-2.5 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-200 font-bold text-sm tracking-wider shadow-lg">
+              <a
+                href="https://www.linkedin.com/company/galas-it-solutions"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="flex items-center space-x-2.5 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white font-bold text-sm tracking-wider shadow-lg transition-all active:scale-95 group"
+                title="View Galas IT Solutions on LinkedIn"
+              >
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
                 <span>GALAS IT SOLUTIONS</span>
-              </div>
+                <span className="text-[10px] text-blue-400 group-hover:translate-x-0.5 transition-transform">↗</span>
+              </a>
             </div>
 
             {/* Lead Architect Attribution */}
-            <div className="mt-8 inline-flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-5 py-3 shadow-xl backdrop-blur-md">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-blue-500/30">
+            <a
+              href="https://www.linkedin.com/in/gajendra-nath-tripathi"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-8 inline-flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-500/30 rounded-2xl px-5 py-3 shadow-xl backdrop-blur-md transition-all active:scale-95 group text-left"
+              title="View Gajendra Nath Tripathi on LinkedIn"
+            >
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-blue-500/30 group-hover:scale-105 transition-transform">
                 GT
               </div>
-              <div className="text-left">
+              <div>
                 <p className="text-xs font-bold text-white flex items-center gap-1.5">
                   Gajendra Nath Tripathi
                   <span className="text-[10px] font-normal text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 font-mono">Lead Architect</span>
+                  <span className="text-[10px] text-slate-400 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all">↗</span>
                 </p>
                 <p className="text-[11px] text-slate-400">
                   Ex-Software Engineer @ <strong className="text-slate-200">Galas IT Solutions</strong> • Creator of Schemio Engine
                 </p>
               </div>
-            </div>
+            </a>
           </div>
         </section>
 
