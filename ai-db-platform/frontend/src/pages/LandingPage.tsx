@@ -125,6 +125,43 @@ const LandingPage = () => {
             <div className="flex items-center gap-2"><Activity className="text-purple-400 w-4 h-4" /> Postgres, MySQL, Mongo, Redis, SQLite</div>
             <div className="flex items-center gap-1 text-amber-400"><Star className="w-4 h-4 fill-amber-400" /><Star className="w-4 h-4 fill-amber-400" /><Star className="w-4 h-4 fill-amber-400" /><Star className="w-4 h-4 fill-amber-400" /><Star className="w-4 h-4 fill-amber-400" /> <span className="text-slate-400 ml-1">4.9/5 Rating (50k+ Queries Audited)</span></div>
           </div>
+
+          {/* ── Trusted By & Engineering Endorsement ── */}
+          <div className="mt-16 pt-10 border-t border-white/5">
+            <p className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-6 font-bold">
+              Trusted by Engineers & Tech Leads Across High-Growth Teams
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-8 md:gap-14 opacity-70 hover:opacity-100 transition-opacity">
+              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                <span>GALAS IT SOLUTIONS</span>
+              </div>
+              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                <span>FIRETECH ENTERPRISES</span>
+              </div>
+              <div className="flex items-center space-x-2 text-slate-300 font-bold text-sm tracking-wider">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                <span>NEON CLOUD PARTNERS</span>
+              </div>
+            </div>
+
+            {/* Lead Architect Attribution */}
+            <div className="mt-8 inline-flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-5 py-3 shadow-xl backdrop-blur-md">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-blue-500/30">
+                GT
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                  Gajendra Nath Tripathi
+                  <span className="text-[10px] font-normal text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 font-mono">Lead Architect</span>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Ex-Software Engineer @ <strong className="text-slate-200">Galas IT Solutions</strong> • Creator of Schemio Engine
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* ── 2. The $300k/hr Problem (Psychological Impact Section) ── */}
