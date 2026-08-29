@@ -48,7 +48,7 @@ const LandingPage = () => {
               <Database className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight text-white">
-              Atlas AI
+              Schemio
             </span>
           </Link>
 
