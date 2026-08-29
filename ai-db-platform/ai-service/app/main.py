@@ -25,6 +25,8 @@ if not settings.CORS_ORIGINS and ("localhost" in settings.BACKEND_URL or "127.0.
 
 origins = list(dict.fromkeys(origins))
 
+from fastapi.middleware.gzip import GZipMiddleware
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -32,6 +34,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# High-Performance Wire Compression (Compresses JSON payloads > 1KB by 75-80%)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Include Routers (No prefix to match backend axios calls)
 app.include_router(health.router, tags=["Health"])

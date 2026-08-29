@@ -76,8 +76,109 @@ router.post('/webhook/razorpay', asyncHandler(async (req: ExpressReq, res: Expre
   }
 
   await verifyRazorpayWebhook(signature, payload);
-
   return res.status(200).json({ status: "ok" });
+}));
+
+// ── Apply Coupon Code ──────────────────────────────────────
+router.post('/apply-coupon', authenticate, asyncHandler(async (req: ExpressReq, res: ExpressRes) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json(new ApiResponse(400, null, "Coupon code is required"));
+  }
+
+  const orgId = req.user?.organizationId;
+  if (!orgId) {
+    return res.status(403).json(new ApiResponse(403, null, "No organization associated with this account"));
+  }
+
+  const cleanCode = code.trim().toUpperCase();
+
+  // 1. Fetch coupon
+  const couponRes = await query(
+    `SELECT * FROM subscription_coupons WHERE code = $1 AND is_active = true`,
+    [cleanCode]
+  );
+
+  if (couponRes.rows.length === 0) {
+    return res.status(404).json(new ApiResponse(404, null, "Invalid or expired coupon code"));
+  }
+
+  const coupon = couponRes.rows[0];
+
+  if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+    return res.status(400).json(new ApiResponse(400, null, "This coupon code has expired"));
+  }
+
+  if (coupon.current_uses >= coupon.max_uses) {
+    return res.status(400).json(new ApiResponse(400, null, "This coupon has reached its maximum redemptions limit"));
+  }
+
+  // 2. Check if already redeemed by this org
+  const redemptionCheck = await query(
+    `SELECT * FROM coupon_redemptions WHERE coupon_id = $1 AND organization_id = $2`,
+    [coupon.id, orgId]
+  );
+
+  if (redemptionCheck.rows.length > 0) {
+    return res.status(400).json(new ApiResponse(400, null, "Your organization has already redeemed this coupon"));
+  }
+
+  // 3. Atomically apply coupon
+  await query('BEGIN');
+  try {
+    await query(
+      `INSERT INTO coupon_redemptions (coupon_id, organization_id, user_id) VALUES ($1, $2, $3)`,
+      [coupon.id, orgId, req.user!.userId]
+    );
+
+    await query(
+      `UPDATE subscription_coupons SET current_uses = current_uses + 1 WHERE id = $1`,
+      [coupon.id]
+    );
+
+    // If 100% lifetime or God-mode coupon, directly upgrade org
+    if (coupon.discount_percent === 100) {
+      const targetPlan = coupon.target_plan || 'mega';
+      await query(
+        `UPDATE organizations SET plan = $1, plan_status = 'active', updated_at = NOW() WHERE id = $2`,
+        [targetPlan, orgId]
+      );
+      await query('COMMIT');
+      return res.status(200).json(new ApiResponse(200, {
+        unlockedPlan: targetPlan,
+        isLifetime: coupon.is_lifetime,
+        message: "🎉 100% Lifetime Developer Access Unlocked!"
+      }, "Coupon redeemed! Plan upgraded successfully."));
+    }
+
+    await query('COMMIT');
+    return res.status(200).json(new ApiResponse(200, {
+      discountPercent: coupon.discount_percent,
+      discountAmountCents: coupon.discount_amount_cents,
+      isLifetime: coupon.is_lifetime
+    }, `Coupon applied! You get ${coupon.discount_percent}% discount.`));
+  } catch (err: any) {
+    await query('ROLLBACK');
+    throw err;
+  }
+}));
+
+// ── GET Invoices & Payment History ─────────────────────────
+router.get('/invoices', authenticate, asyncHandler(async (req: ExpressReq, res: ExpressRes) => {
+  const orgId = req.user?.organizationId;
+  if (!orgId) {
+    return res.status(403).json(new ApiResponse(403, null, "No organization associated with this account"));
+  }
+
+  const result = await query(
+    `SELECT id, invoice_number, amount_cents, tax_cents, currency, status, plan_code, payment_provider, provider_payment_id, created_at
+     FROM billing_invoices
+     WHERE organization_id = $1
+     ORDER BY created_at DESC`,
+    [orgId]
+  );
+
+  return res.status(200).json(new ApiResponse(200, result.rows, "Invoices fetched successfully"));
 }));
 
 export default router;

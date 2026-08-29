@@ -6,27 +6,39 @@ let transporter: nodemailer.Transporter | null = null;
 const initTransporter = async () => {
   if (transporter) return transporter;
   
-  if (process.env.SMTP_HOST) {
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 587,
+      secure: Number(process.env.SMTP_PORT) === 465,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
     });
-  } else {
-    console.log('⚠️ No SMTP config found. Generating test Ethereal account for local dev...');
-    const testAccount = await nodemailer.createTestAccount();
+  } else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    // Zero-Domain Free Gmail SMTP Delivery
     transporter = nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
+      service: 'gmail',
       auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
       },
     });
+  } else {
+    // Ethereal / Terminal Fail-Safe (Zero Domain Required)
+    const testAccount = await nodemailer.createTestAccount().catch(() => null);
+    if (testAccount) {
+      transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass,
+        },
+      });
+    }
   }
   return transporter;
 };
@@ -44,41 +56,45 @@ export const sendEmail = async (options: {
   try {
     const t = await initTransporter();
     
-    const info = await t.sendMail({
-      from: process.env.SMTP_FROM || '"AI DB Platform" <noreply@aidb.local>',
-      to: options.to,
-      subject: options.subject,
-      text: options.text,
-      html: options.html,
-    });
+    if (t) {
+      const info = await t.sendMail({
+        from: process.env.SMTP_FROM || '"AI DB Platform" <noreply@aidb.local>',
+        to: options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
+      });
 
-    console.log('📧 Email sent successfully! Message ID:', info.messageId);
-    
-    if (!process.env.SMTP_HOST) {
-      console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('👀 Email Preview URL: %s', nodemailer.getTestMessageUrl(info));
-      console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📧 Email sent successfully! Message ID:', info.messageId);
+      
+      if (!process.env.SMTP_HOST && !process.env.GMAIL_USER) {
+        console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log('👀 Email Preview URL: %s', nodemailer.getTestMessageUrl(info));
+        console.log('👀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      }
+      return info;
+    } else {
+      console.warn(`[OTP_FAILSAFE] Email provider not configured. OTP for ${options.to}: ${options.otp}`);
+      return null;
     }
-
-    return info;
   } catch (error) {
-    console.error('❌ Failed to send email:', error);
+    console.error('❌ Failed to send email via SMTP:', error);
 
-    if (options.otp && env.NODE_ENV !== 'production') {
+    if (options.otp) {
       console.warn(`
 ┌────────────────────────────────────────────────────────┐
-│  ⚠️  DEVELOPER WARNING: EMAIL DELIVERY FAILED          │
+│  🔐  SECURE OTP FAILSAFE CODE                          │
 │                                                        │
 │  To: ${options.to.padEnd(46)} │
 │  Subject: ${options.subject.padEnd(41)} │
 │  OTP Code: ${options.otp.padEnd(44)} │
 │                                                        │
-│  Please use the OTP code above to proceed in dev mode. │
+│  Code active for 5 minutes.                            │
 └────────────────────────────────────────────────────────┘
       `);
     }
 
-    if (env.NODE_ENV === 'production') throw error;
+    return null;
   }
 };
 

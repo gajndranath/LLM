@@ -127,12 +127,12 @@ router.post('/reset-password', authRateLimiter, validateRequest(resetPasswordSch
 // POST /api/auth/refresh
 router.post('/refresh', validateRequest(refreshSchema), asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = req.body;
-  const accessToken = await refreshAccessToken(refreshToken);
+  const { accessToken, newRefreshToken } = await refreshAccessToken(refreshToken);
   
   setAuthCookie(res, accessToken);
   
   return res.status(200).json(
-    new ApiResponse(200, null, "Token refreshed")
+    new ApiResponse(200, { refreshToken: newRefreshToken }, "Token rotated & refreshed successfully")
   );
 }));
 

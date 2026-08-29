@@ -38,7 +38,7 @@ export const createConnection = async (
   userId: string,
   input: ConnectionInput
 ): Promise<ConnectionRow> => {
-  const { name, host, port = 5432, databaseName, username, password, sslEnabled = false } = input;
+  const { name, host, port = 5432, databaseName, username, password, sslEnabled = false, dbType = 'postgres' } = input;
 
   // Cleanup any inactive connection with the same name for this user to avoid conflicts
   await query(
@@ -51,11 +51,11 @@ export const createConnection = async (
 
   const result = await query(
     `INSERT INTO db_connections
-       (user_id, name, host, port, database_name, username, password_enc, ssl_enabled)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (user_id, name, host, port, database_name, username, password_enc, ssl_enabled, db_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING id, user_id, name, host, port, database_name, username,
-               ssl_enabled, is_active, last_tested_at, last_test_ok, created_at`,
-    [userId, name, host, port, databaseName, username, passwordEnc, sslEnabled]
+               ssl_enabled, is_active, db_type, last_tested_at, last_test_ok, created_at`,
+    [userId, name, host, port, databaseName, username, passwordEnc, sslEnabled, dbType]
   );
 
   return result.rows[0];
@@ -65,15 +65,15 @@ export const createConnection = async (
 export const listConnections = async (userId: string): Promise<ConnectionRow[]> => {
   const result = await query(
     `SELECT dc.id, dc.user_id, dc.name, dc.host, dc.port, dc.database_name, dc.username,
-            dc.ssl_enabled, dc.is_active, dc.last_tested_at, dc.last_test_ok, dc.created_at
+            dc.ssl_enabled, dc.is_active, COALESCE(dc.db_type, 'postgres') AS db_type, dc.last_tested_at, dc.last_test_ok, dc.created_at
      FROM db_connections dc
      WHERE dc.is_active = true
        AND (
          dc.user_id = $1
          OR dc.user_id IN (
-           SELECT u2.id FROM users u1
-           JOIN users u2 ON u1.organization_id = u2.organization_id
-           WHERE u1.id = $1 AND u1.organization_id IS NOT NULL
+           SELECT u.id FROM users u
+           WHERE u.organization_id = (SELECT organization_id FROM users WHERE id = $1)
+             AND u.organization_id IS NOT NULL
          )
        )
      ORDER BY dc.created_at DESC`,

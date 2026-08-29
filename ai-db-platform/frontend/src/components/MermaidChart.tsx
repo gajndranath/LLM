@@ -48,11 +48,11 @@ function sanitizeMermaidChart(chart: string): string {
     const sanitizedLines = lines.map(line => {
       let trimmed = line.trim();
 
-      if (trimmed.includes('{')) {
+      if (trimmed.includes('{') && !trimmed.includes('--')) {
         insideTable = true;
         return line;
       }
-      if (trimmed.includes('}')) {
+      if (trimmed.includes('}') && !trimmed.includes('--')) {
         insideTable = false;
         return line;
       }
@@ -76,7 +76,7 @@ function sanitizeMermaidChart(chart: string): string {
         if (tokens.length >= 2) {
           const type = tokens[0];
           const column = tokens[1];
-          const key = tokens.slice(2).join(' '); // e.g. PK, FK
+          const keyRaw = tokens.slice(2).join(' '); // e.g. PK, FK, NOT NULL
 
           // Ensure type is valid alphanumeric or wrapped in double quotes
           let safeType = type;
@@ -87,7 +87,13 @@ function sanitizeMermaidChart(chart: string): string {
           // Ensure column name is safe alphanumeric snake_case
           const safeColumn = column.replace(/[^a-zA-Z0-9_]/g, '');
 
-          return `    ${safeType} ${safeColumn} ${key}`;
+          // Wrap unknown keys (like NOT NULL) in quotes for Mermaid
+          let safeKey = keyRaw;
+          if (keyRaw && !/^(PK|FK|UK)$/i.test(keyRaw)) {
+            safeKey = `"${keyRaw.replace(/"/g, '')}"`;
+          }
+
+          return `    ${safeType} ${safeColumn} ${safeKey}`;
         }
       }
       return line;
@@ -133,20 +139,42 @@ const MermaidChart: React.FC<MermaidProps> = ({ chart }) => {
         }
       `}</style>
 
-      {/* Inline Render with Maximize Action */}
-      <div className="relative">
-        <button
-          onClick={() => setIsFullscreen(true)}
-          className="absolute top-4 right-4 z-10 p-2 bg-slate-900/80 hover:bg-blue-600 text-slate-400 hover:text-white rounded-xl border border-white/10 transition-all opacity-0 group-hover/mermaid:opacity-100 shadow-lg flex items-center justify-center"
-          title="Fullscreen View"
+      {/* Inline Render with Pan/Zoom & Trackpad drag */}
+      <div className="relative border border-white/5 rounded-2xl overflow-hidden bg-slate-950/40 shadow-inner">
+        <TransformWrapper
+          initialScale={1}
+          minScale={0.2}
+          maxScale={4}
+          centerOnInit={true}
+          wheel={{ step: 0.08 }}
+          panning={{ velocityDisabled: true }}
         >
-          <Maximize2 size={14} />
-        </button>
+          {({ zoomIn, zoomOut, resetTransform }) => (
+            <>
+              {/* Floating Quick Pan/Zoom & Fullscreen Controls */}
+              <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-slate-900/90 p-1.5 rounded-xl border border-white/10 backdrop-blur-md shadow-2xl">
+                <button onClick={() => zoomIn()} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title="Zoom In"><ZoomIn size={13} /></button>
+                <button onClick={() => zoomOut()} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title="Zoom Out"><ZoomOut size={13} /></button>
+                <button onClick={() => resetTransform()} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title="Reset Scale"><Move size={13} /></button>
+                <div className="w-px h-3.5 bg-white/10 mx-0.5" />
+                <button
+                  onClick={() => setIsFullscreen(true)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+                  title="Fullscreen Expand"
+                >
+                  <Maximize2 size={13} />
+                </button>
+              </div>
 
-        <div 
-          className="mermaid-container flex justify-center bg-slate-950/20 p-8 rounded-2xl overflow-auto border border-white/5 shadow-inner min-h-[350px] w-full"
-          dangerouslySetInnerHTML={{ __html: svg }} 
-        />
+              <TransformComponent wrapperStyle={{ width: '100%', height: '420px', cursor: 'grab' }}>
+                <div 
+                  className="mermaid-container flex items-center justify-center p-8 min-h-[400px] w-full select-none"
+                  dangerouslySetInnerHTML={{ __html: svg }} 
+                />
+              </TransformComponent>
+            </>
+          )}
+        </TransformWrapper>
       </div>
 
       {/* Fullscreen Modal Popup Overlay */}

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { connectionsApi } from '../api/connections.api';
 import { queryApi } from '../api/query.api';
@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 const Dashboard = () => {
   const queryClient = useQueryClient();
   const { selectedConnectionId } = useWorkspaceStore();
+  const [missionPage, setMissionPage] = useState(1);
 
   const { data: connData } = useQuery({
     queryKey: ['connections'],
@@ -164,44 +165,74 @@ const Dashboard = () => {
         </div>
 
         {/* Active Missions List */}
-        <div className="glass rounded-[2.5rem] p-8 flex flex-col">
-          <div className="flex items-center justify-between mb-6">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ongoing Missions</span>
-            <span className="text-[10px] font-bold text-blue-400">{missions?.filter((m: any) => m.status !== 'COMPLETED').length || 0} Pending</span>
+        <div className="glass rounded-[2.5rem] p-8 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ongoing Missions</span>
+              <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                {missions?.filter((m: any) => m.status !== 'COMPLETED').length || 0} Pending
+              </span>
+            </div>
+
+            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+              {missions?.length === 0 ? (
+                <div className="text-center py-12 opacity-40">
+                  <Target size={32} className="mx-auto mb-2 text-slate-500" />
+                  <p className="text-xs font-bold uppercase text-slate-400">All Missions Resolved</p>
+                </div>
+              ) : (
+                missions?.slice((missionPage - 1) * 3, missionPage * 3).map((mission: any) => (
+                  <div key={mission.id} className={`p-4 rounded-2xl border transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5 hover:border-white/10'}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 pr-3">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            mission.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
+                            mission.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
+                            'bg-blue-500/20 text-blue-400'
+                          }`}>{mission.priority}</span>
+                          <h4 className={`text-xs font-bold truncate ${mission.status === 'COMPLETED' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{mission.title}</h4>
+                        </div>
+                        <p className="text-[10px] text-slate-400 line-clamp-1">{mission.description}</p>
+                      </div>
+                      <button
+                        onClick={() => updateMissionStatus(mission.id, mission.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')}
+                        title={mission.status === 'COMPLETED' ? 'Mark Incomplete' : 'Mark Complete'}
+                        className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                          mission.status === 'COMPLETED' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-slate-500 hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
-          <div className="space-y-3 flex-1 overflow-auto pr-2 custom-scrollbar">
-            {missions?.length === 0 ? (
-              <div className="text-center py-10 opacity-30">
-                <Target size={32} className="mx-auto mb-2 text-slate-600" />
-                <p className="text-[10px] font-bold uppercase">No Active Missions</p>
+          {/* Mission Pagination */}
+          {missions && missions.length > 3 && (
+            <div className="flex items-center justify-between pt-4 mt-2 border-t border-white/5 text-xs text-slate-400">
+              <span>Page {missionPage} of {Math.ceil(missions.length / 3)}</span>
+              <div className="flex gap-2">
+                <button
+                  disabled={missionPage === 1}
+                  onClick={() => setMissionPage(p => Math.max(p - 1, 1))}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                >
+                  Prev
+                </button>
+                <button
+                  disabled={missionPage >= Math.ceil(missions.length / 3)}
+                  onClick={() => setMissionPage(p => p + 1)}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                >
+                  Next
+                </button>
               </div>
-            ) : (
-              missions?.map((mission: any) => (
-                <div key={mission.id} className={`p-4 rounded-2xl border transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5'}`}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 pr-4">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${mission.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
-                            mission.priority === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
-                              'bg-blue-500/20 text-blue-400'
-                          }`}>{mission.priority}</span>
-                        <h4 className={`text-xs font-bold ${mission.status === 'COMPLETED' ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{mission.title}</h4>
-                      </div>
-                      <p className="text-[10px] text-slate-500 line-clamp-1">{mission.description}</p>
-                    </div>
-                    <button
-                      onClick={() => updateMissionStatus(mission.id, mission.status === 'COMPLETED' ? 'PLANNED' : 'COMPLETED')}
-                      className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all ${mission.status === 'COMPLETED' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-slate-600 hover:text-white hover:bg-white/10'
-                        }`}
-                    >
-                      <CheckCircle2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

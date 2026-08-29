@@ -1,65 +1,72 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from './auth.middleware';
+import { ApiError } from '../utils/ApiError';
 
-// Role hierarchy — higher index = more permissions
-const ROLE_HIERARCHY: UserRole[] = [
-  'VIEWER',
-  'DRIVER',
-  'ANALYST',
-  'DISPATCHER',
-  'ADMIN',
-  'SUPER_ADMIN',
-];
+export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'ORG_ADMIN' | 'LEAD_ARCHITECT' | 'MEMBER' | 'JUNIOR_DEV' | 'VIEWER' | 'SECURITY_AUDITOR';
 
-// Require one of specific roles (exact match)
-export const requireRole = (...roles: UserRole[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = req.user?.role;
+const ROLE_HIERARCHY: Record<string, number> = {
+  VIEWER: 1,
+  JUNIOR_DEV: 2,
+  MEMBER: 2,
+  SECURITY_AUDITOR: 2,
+  LEAD_ARCHITECT: 3,
+  ORG_ADMIN: 4,
+  ADMIN: 4,
+  SUPER_ADMIN: 5,
+};
 
-    if (!userRole) {
-      res.status(401).json({ error: 'Not authenticated' });
-      return;
+/**
+ * Require an exact specific role or one of multiple allowed roles
+ */
+export const requireRole = (...allowedRoles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new ApiError(401, 'Unauthorized. Please login to continue.'));
     }
 
-    if (!roles.includes(userRole)) {
-      res.status(403).json({
-        error: 'Insufficient permissions',
-        required: roles,
-        current: userRole,
-      });
-      return;
+    const userRole = req.user.role || 'VIEWER';
+
+    if (userRole === 'SUPER_ADMIN') {
+      return next();
+    }
+
+    if (!allowedRoles.includes(userRole)) {
+      return next(
+        new ApiError(
+          403,
+          `Forbidden: Role '${userRole}' does not have permission for this action.`
+        )
+      );
     }
 
     next();
   };
 };
 
-// Check if user has at least a minimum role level
-export const requireMinRole = (minRole: UserRole) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = req.user?.role;
-
-    if (!userRole) {
-      res.status(401).json({ error: 'Not authenticated' });
-      return;
+/**
+ * Require at least a minimum role level in the hierarchy
+ */
+export const requireMinRole = (minRole: string) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new ApiError(401, 'Unauthorized. Please login to continue.'));
     }
 
-    const userLevel = ROLE_HIERARCHY.indexOf(userRole);
-    const requiredLevel = ROLE_HIERARCHY.indexOf(minRole);
+    const userRole = req.user.role || 'VIEWER';
+    const userLevel = ROLE_HIERARCHY[userRole] || 1;
+    const minLevel = ROLE_HIERARCHY[minRole] || 1;
 
-    if (userLevel < requiredLevel) {
-      res.status(403).json({
-        error: 'Insufficient permissions',
-        required: minRole,
-        current: userRole,
-      });
-      return;
+    if (userLevel < minLevel) {
+      return next(
+        new ApiError(
+          403,
+          `Forbidden: Role '${userRole}' is below minimum required role '${minRole}'.`
+        )
+      );
     }
 
     next();
   };
 };
 
-// Shorthand: only SUPER_ADMIN can access
-export const requireSuperAdmin = requireRole('SUPER_ADMIN');
+export const requirePermission = (allowedRoles: UserRole[]) => requireRole(...allowedRoles);
 

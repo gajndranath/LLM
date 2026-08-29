@@ -12,8 +12,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
+      refetchOnMount: false, // Prevents loading spinners when returning to already cached pages
       retry: 1,
-      staleTime: 5 * 60 * 1000,
+      staleTime: 10 * 60 * 1000, // 10 minutes cache validity
+      gcTime: 30 * 60 * 1000,    // Keep in garbage collection cache for 30 mins
     },
   },
 });

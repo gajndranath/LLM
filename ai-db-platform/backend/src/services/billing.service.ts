@@ -71,13 +71,30 @@ export const verifyRazorpayWebhook = async (
     .update(payload)
     .digest('hex');
 
+  // Constant-time comparison to prevent side-channel timing attacks
+  const signatureBuffer = Buffer.from(signature, 'utf8');
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+  const isSignatureValid = signatureBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+
   const event = data.event;
+  const createdAt = data.created_at || data.payload?.payment?.entity?.created_at;
+
+  // Webhook Replay Attack Defense: Reject webhooks older than 5 minutes (300 seconds)
+  if (createdAt) {
+    const eventTimeMs = typeof createdAt === 'number' && createdAt < 1e11 ? createdAt * 1000 : Number(createdAt);
+    if (Date.now() - eventTimeMs > 300 * 1000) {
+      console.warn(`[SECURITY] Rejected expired/replayed webhook from timestamp: ${new Date(eventTimeMs).toISOString()}`);
+      throw new ApiError(400, 'Webhook timestamp expired. Possible replay attack.');
+    }
+  }
+
   const payment = data.payload?.payment?.entity;
   const orderId = payment?.order_id;
   const orgId = payment?.notes?.orgId;
   const plan = payment?.notes?.plan;
 
-  if (expectedSignature !== signature) {
+  if (!isSignatureValid) {
     // FRAUD ATTEMPT DETECTED!
     if (orderId && orgId && plan) {
       // Mark transaction as a failed/fraud attempt

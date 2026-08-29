@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CreditCard, Zap, Star, Infinity as InfinityIcon, CheckCircle2, Loader2, Calendar, FileText } from 'lucide-react';
+import { Zap, Star, Infinity as InfinityIcon, CheckCircle2, Loader2, Calendar, FileText } from 'lucide-react';
 import { adminApi } from '../api/auth.api';
 import { toast } from 'sonner';
 
@@ -11,6 +11,8 @@ const BillingPage = () => {
   const [loading, setLoading] = useState(true);
   const [billingInfo, setBillingInfo] = useState<any>(null);
   const [dynamicPlans, setDynamicPlans] = useState<any[]>([]);
+  const [couponCode, setCouponCode] = useState('');
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -81,13 +83,20 @@ const BillingPage = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-blue-400" size={40} />
-      </div>
-    );
-  }
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) return toast.error('Please enter a coupon code');
+    setApplyingCoupon(true);
+    try {
+      const { api } = await import('../api/axiosInstance');
+      const res = await api.post('/billing/apply-coupon', { code: couponCode });
+      toast.success(res.data.message || 'Coupon applied successfully!');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to apply coupon');
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
 
   const handleCancelPlan = async () => {
     if (!window.confirm("Are you sure you want to cancel your plan? You will be downgraded to the FREE plan immediately.")) return;
@@ -102,20 +111,65 @@ const BillingPage = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[400px]">
+        <Loader2 className="animate-spin text-blue-400" size={40} />
+      </div>
+    );
+  }
+
   const currentPlan = billingInfo?.organization?.plan || 'free';
   const orgName = billingInfo?.organization?.name;
   const nextBillingDate = billingInfo?.nextBillingDate ? new Date(billingInfo.nextBillingDate).toLocaleDateString() : null;
   const transactions = billingInfo?.transactions || [];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-black text-white flex items-center space-x-3">
-          <CreditCard size={28} className="text-amber-400" />
-          <span>Billing & Plans</span>
-        </h1>
-        <p className="text-slate-400 mt-1">Manage subscription for {orgName}</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-black text-white tracking-tight">Billing & Subscriptions</h1>
+          <p className="text-slate-400 text-sm mt-1">Manage enterprise plan & tax invoices for {orgName || 'your organization'}</p>
+        </div>
+      </div>
+
+      {/* 7-Day Trial & Coupon Box */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="glass p-6 rounded-3xl border border-white/5 lg:col-span-2 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
+                🎁
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">7-Day Free Enterprise Trial</h3>
+                <p className="text-xs text-slate-400">All new organizations get full access to AI Architect & 5 DB connections.</p>
+              </div>
+            </div>
+            <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-full uppercase">Active Trial Mode</span>
+          </div>
+        </div>
+
+        <div className="glass p-6 rounded-3xl border border-white/5 flex flex-col justify-between">
+          <h3 className="text-sm font-bold text-white mb-2">🎟️ Have a Promo / God-Mode Coupon?</h3>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="e.g. ATLAS_FOUNDER_LIFETIME"
+              value={couponCode}
+              onChange={e => setCouponCode(e.target.value.toUpperCase())}
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono uppercase text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+            <button
+              onClick={handleApplyCoupon}
+              disabled={applyingCoupon}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold whitespace-nowrap active:scale-95 transition-all"
+            >
+              {applyingCoupon ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Active Subscription Details */}
@@ -126,12 +180,12 @@ const BillingPage = () => {
           </div>
           <div>
             <h3 className="text-xl font-bold text-white mb-1">
-              Active Plan: <span className="uppercase text-blue-400">{currentPlan}</span>
+              Status: <span className="uppercase text-emerald-400">{currentPlan === 'free' ? '7-Day Free Trial' : currentPlan}</span>
             </h3>
             <p className="text-slate-400 text-sm max-w-md">
               {currentPlan === 'free' 
-                ? "You are currently on the free tier. Upgrade to unlock more connections and query limits." 
-                : "You have full access to enterprise features. Your payment is verified."}
+                ? "You are on the 7-Day Full-Access Enterprise Trial. After 7 days, select an Individual, Growth, or Mega plan to continue using ATLAS." 
+                : "Your enterprise plan is active with verified subscription."}
             </p>
             {nextBillingDate && (
               <div className="mt-4 flex items-center space-x-2 text-sm text-slate-300 bg-white/5 w-max px-3 py-1.5 rounded-lg border border-white/5">

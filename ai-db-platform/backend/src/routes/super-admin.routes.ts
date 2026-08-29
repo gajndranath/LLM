@@ -20,9 +20,22 @@ import { io } from '../index';
 
 const router = Router();
 
-// ALL routes require SUPER_ADMIN role
+// ALL routes require SUPER_ADMIN role & IP allowlist verification in production
+const ipAllowlistMiddleware = (req: Request, res: Response, next: any) => {
+  if (process.env.NODE_ENV === 'production' && process.env.ADMIN_ALLOWED_IPS) {
+    const allowedIps = process.env.ADMIN_ALLOWED_IPS.split(',').map(ip => ip.trim());
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+    if (!allowedIps.includes(clientIp)) {
+      console.warn(`[SECURITY] Blocked non-allowlisted IP access to Super Admin: ${clientIp}`);
+      return res.status(403).json(new ApiResponse(403, null, "Access denied: IP address not authorized for administrative access."));
+    }
+  }
+  next();
+};
+
 router.use(authenticate);
 router.use(requireRole('SUPER_ADMIN'));
+router.use(ipAllowlistMiddleware);
 
 // ── GET /api/super-admin/stats ─────────────────────────────
 router.get('/stats', asyncHandler(async (_req: Request, res: Response) => {
@@ -163,6 +176,74 @@ router.get('/plans', asyncHandler(async (req: Request, res: Response) => {
   const { dbQuery: query } = await import('../config/database');
   const result = await query('SELECT * FROM subscription_plans ORDER BY price_cents ASC');
   return res.status(200).json(new ApiResponse(200, result.rows, 'Plans fetched'));
+}));
+
+// ── COUPON GENERATOR & MANAGEMENT (SUPER ADMIN ONLY) ─────────
+const createCouponSchema = z.object({
+  name: z.string().min(2, "Campaign name must be at least 2 characters").max(100),
+  code: z.string().default(''),
+  discountPercent: z.coerce.number().min(1).max(100).default(100),
+  isLifetime: z.boolean().default(true),
+  maxUses: z.coerce.number().int().min(1).default(1),
+  targetPlan: z.string().default('mega'),
+});
+
+router.post('/coupons/generate', validateRequest(createCouponSchema), asyncHandler(async (req: Request, res: Response) => {
+  const { dbQuery: query } = await import('../config/database');
+  const { name, code, discountPercent, isLifetime, maxUses, targetPlan } = req.body;
+
+  // Clean, human-friendly coupon code format (e.g. VIP100, MEGA50, LAUNCH88)
+  let generatedCode = code ? String(code).trim().toUpperCase() : '';
+  
+  if (!generatedCode) {
+    const cleanPrefix = name.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 5) || 'PROMO';
+    const discNum = Number(discountPercent) || 100;
+    const randomDigit = Math.floor(10 + Math.random() * 90); // 2-digit clean suffix
+    generatedCode = `${cleanPrefix}${discNum === 100 ? 'FREE' : discNum}${randomDigit}`;
+  }
+
+  const result = await query(
+    `INSERT INTO subscription_coupons
+       (name, code, discount_percent, is_lifetime, max_uses, current_uses, target_plan, is_active)
+     VALUES ($1, $2, $3, $4, $5, 0, $6, true)
+     ON CONFLICT (code) DO UPDATE 
+     SET name = $1, discount_percent = $3, is_lifetime = $4, max_uses = $5, current_uses = 0, target_plan = $6, is_active = true
+     RETURNING *`,
+    [name.trim(), generatedCode, Number(discountPercent) || 100, isLifetime !== false, Number(maxUses) || 1, targetPlan || 'mega']
+  );
+
+  console.log(`[AUDIT] SuperAdmin ${req.user!.userId} generated coupon ${generatedCode} for campaign '${name}' (Max uses: ${maxUses})`);
+
+  return res.status(201).json(new ApiResponse(201, result.rows[0], "Coupon generated successfully"));
+}));
+
+router.get('/coupons', asyncHandler(async (req: Request, res: Response) => {
+  const { dbQuery: query } = await import('../config/database');
+  const result = await query('SELECT * FROM subscription_coupons ORDER BY created_at DESC');
+  return res.status(200).json(new ApiResponse(200, result.rows, 'Coupons list fetched'));
+}));
+
+// Toggle coupon status (Activate / Deactivate)
+router.put('/coupons/:id/toggle', asyncHandler(async (req: Request, res: Response) => {
+  const { dbQuery: query } = await import('../config/database');
+  const { id } = req.params;
+  const result = await query(
+    `UPDATE subscription_coupons 
+     SET is_active = NOT is_active 
+     WHERE id = $1 
+     RETURNING *`,
+    [id]
+  );
+  if (result.rows.length === 0) throw new ApiError(404, 'Coupon not found');
+  return res.status(200).json(new ApiResponse(200, result.rows[0], 'Coupon status updated'));
+}));
+
+// Delete coupon permanently
+router.delete('/coupons/:id', asyncHandler(async (req: Request, res: Response) => {
+  const { dbQuery: query } = await import('../config/database');
+  const { id } = req.params;
+  await query('DELETE FROM subscription_coupons WHERE id = $1', [id]);
+  return res.status(200).json(new ApiResponse(200, null, 'Coupon deleted successfully'));
 }));
 
 const createPlanSchema = z.object({

@@ -65,7 +65,7 @@ class InsightsResponse(BaseModel):
     dfd_mermaid: Optional[str] = None
     flow_mermaid: Optional[str] = None
 
-class ArchitectureReviewRequest(BaseModel):
+class ArchitectureReviewRequest(BaseAIRequest):
     schema_context: str
     requirements: Optional[str] = None
     expected_scale: Optional[str] = "1M rows"
@@ -150,6 +150,9 @@ class SchemaGenerationResponse(BaseModel):
     normalization_level: Optional[str] = "3NF"
     scalability_notes: Optional[str] = None
     acid_compliance: bool = True
+    reliability_score: int = 95
+    isolation_level: Optional[str] = "READ COMMITTED + ROW LOCKS"
+
 
 class AuditIssue(BaseModel):
     category: str = "General"
@@ -175,3 +178,25 @@ class SeniorAuditResponse(BaseModel):
     health_score: int = 0
     erd_mermaid: Optional[str] = None
     dfd_mermaid: Optional[str] = None
+
+# ── Strict Design Studio Request Models ──────────────────────
+class ProbeRequirementsRequest(BaseAIRequest):
+    user_input: str
+    conversation_context: Optional[str] = ""
+    schema_context: Optional[str] = ""
+
+class GenerateSchemaRequest(BaseAIRequest):
+    conversation_transcript: str
+    current_schema: Optional[str] = ""
+    last_error: Optional[str] = ""
+
+class SeniorAuditRequest(BaseAIRequest):
+    schema_text: str = Field(alias="schema")
+    user_concerns: Optional[str] = ""
+
+    class Config:
+        populate_by_name = True
+
+class SchemaVisualsRequest(BaseAIRequest):
+    schema_context: str
+

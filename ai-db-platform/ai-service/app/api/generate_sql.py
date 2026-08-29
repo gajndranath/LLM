@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Header, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from app.models.pydantic_schemas import (
@@ -14,12 +15,17 @@ from app.models.pydantic_schemas import (
     SeniorAuditResponse,
     SQLTransformRequest,
     SQLTransformResponse,
-    ValidationResult
+    ValidationResult,
+    ProbeRequirementsRequest,
+    GenerateSchemaRequest,
+    SeniorAuditRequest,
+    SchemaVisualsRequest
 )
 from app.services.llm_service import LLMService
 from app.services.sql_validator import validate_sql_safety, transform_sql
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 async def verify_internal_secret(x_internal_secret: str = Header(None)):
@@ -111,113 +117,105 @@ async def analyze_architecture_endpoint(
 # ── Design Studio Endpoints ──────────────────────────────────
 @router.post("/design-studio/probe-requirements", response_model=dict)
 async def probe_requirements_endpoint(
-    request_body: dict,
+    request: ProbeRequirementsRequest,
     _ = Depends(verify_internal_secret)
 ):
     """
     Generate probing questions for database requirements gathering.
     """
-    llm_service = LLMService(request_body.get("provider"), request_body.get("model"))
+    llm_service = LLMService(request.provider, request.model)
     try:
         probes = await llm_service.generate_requirement_probes(
-            request_body.get("user_input"),
-            request_body.get("conversation_context", "")
+            request.user_input,
+            request.conversation_context or ""
         )
         return {"probes": probes}
     except Exception as e:
         error_str = str(e).lower()
         if "ratelimiterror" in error_str or "rate limit" in error_str:
-            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded! The current model has run out of tokens. Please switch to OpenAI or Gemini from the top-right model selector.")
-        if "badrequesterror" in error_str:
-            raise HTTPException(status_code=400, detail="The AI model rejected the request. It might not support this complex schema. Please try switching the model.")
-        raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded! Please switch provider or retry.")
+        logger.error(f"Probe requirements error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate requirement probes. Please retry.")
 
 @router.post("/design-studio/probe-requirements-stream")
 async def probe_requirements_stream_endpoint(
-    request_body: dict,
+    request: ProbeRequirementsRequest,
     _ = Depends(verify_internal_secret)
 ):
     """
-    Streaming version of probe requirements.
-    Streams back text chunks as they are generated.
+    Streaming version of probe requirements (Server-Sent Events / plain chunk stream).
     """
-    llm_service = LLMService(request_body.get("provider"), request_body.get("model"))
+    llm_service = LLMService(request.provider, request.model)
     try:
         generator = llm_service.generate_requirement_probes_stream(
-            request_body.get("user_input"),
-            request_body.get("conversation_context", "")
+            request.user_input,
+            request.conversation_context or "",
+            request.schema_context or ""
         )
         return StreamingResponse(generator, media_type="text/plain")
     except Exception as e:
-        error_str = str(e).lower()
-        if "ratelimiterror" in error_str or "rate limit" in error_str:
-            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded!")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+        logger.error(f"Streaming probe error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to stream requirement probes.")
 
 @router.post("/design-studio/generate-schema", response_model=dict)
 async def generate_schema_endpoint(
-    request_body: dict,
+    request: GenerateSchemaRequest,
     _ = Depends(verify_internal_secret)
 ):
     """
     Generate complete database schema from conversation requirements.
     """
-    llm_service = LLMService(request_body.get("provider"), request_body.get("model"))
+    llm_service = LLMService(request.provider, request.model)
     try:
         schema = await llm_service.generate_schema_from_requirements(
-            request_body.get("conversation_transcript")
+            request.conversation_transcript,
+            request.current_schema or "",
+            request.last_error or ""
         )
         return {"schema": schema}
     except Exception as e:
         error_str = str(e).lower()
         if "ratelimiterror" in error_str or "rate limit" in error_str:
-            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded! The current model has run out of tokens. Please switch to OpenAI or Gemini from the top-right model selector.")
-        if "badrequesterror" in error_str:
-            raise HTTPException(status_code=400, detail="The AI model rejected the request. It might not support this complex schema. Please try switching the model.")
-        raise HTTPException(status_code=500, detail=str(e))
-
+            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded! Please switch model.")
+        logger.error(f"Schema generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate database schema blueprint.")
 
 @router.post("/design-studio/audit-senior-level", response_model=dict)
 async def audit_senior_level_endpoint(
-    request_body: dict,
+    request: SeniorAuditRequest,
     _ = Depends(verify_internal_secret)
 ):
     """
     Senior-level audit of existing database architecture.
     """
-    llm_service = LLMService(request_body.get("provider"), request_body.get("model"))
+    llm_service = LLMService(request.provider, request.model)
     try:
         audit = await llm_service.audit_senior_level(
-            request_body.get("schema")
+            request.schema_text,
+            request.user_concerns or ""
         )
         return {"audit": audit}
     except Exception as e:
-        error_str = str(e).lower()
-        if "ratelimiterror" in error_str or "rate limit" in error_str:
-            raise HTTPException(status_code=429, detail="API Rate Limit Exceeded! The current model has run out of tokens. Please switch to OpenAI or Gemini from the top-right model selector.")
-        if "badrequesterror" in error_str:
-            raise HTTPException(status_code=400, detail="The AI model rejected the request. It might not support this complex schema. Please try switching the model.")
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Senior audit error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to complete database architecture audit.")
 
 @router.post("/generate-schema-visuals")
 async def generate_schema_visuals_endpoint(
-    request_body: dict,
+    request: SchemaVisualsRequest,
     _ = Depends(verify_internal_secret)
 ):
     """
     Generate ERD and DFD for a complete schema context.
     """
-    llm_service = LLMService(request_body.get("provider"), request_body.get("model"))
+    llm_service = LLMService(request.provider, request.model)
     try:
         result = await llm_service.generate_schema_diagrams(
-            request_body.get("schema_context")
+            request.schema_context
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Schema visuals error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to compile schema diagrams.")
 
 
 @router.post("/transform-sql", response_model=SQLTransformResponse)

@@ -11,7 +11,7 @@ export const syncSchema = async () => {
   
   try {
     const schemaPath = path.join(__dirname, '../db/schema.sql');
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    const schemaSql = await fs.promises.readFile(schemaPath, 'utf8');
     
     // Split by semicolon but ignore ones inside functions
     // For simplicity, we run the whole block

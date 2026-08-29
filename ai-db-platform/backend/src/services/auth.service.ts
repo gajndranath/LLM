@@ -11,6 +11,10 @@ import { redisClient, getRedisStatus } from '../config/redis';
 
 const SALT_ROUNDS = 12;
 
+// In-memory fallback trackers for lockout when Redis is disconnected
+const memoryAttempts = new Map<string, { count: number; expiresAt: number }>();
+const memoryLockouts = new Map<string, number>();
+
 
 
 /**
@@ -44,8 +48,12 @@ export const requestOTP = async (email: string) => {
     );
   }
 
-  // Send Email
-  await sendOTPEmail(email, otp);
+  // Dispatch Email as Asynchronous Background Worker Task (Non-Blocking HTTP Response)
+  setImmediate(() => {
+    sendOTPEmail(email, otp).catch(err => {
+      console.error(`[BACKGROUND_WORKER] Failed to send OTP email to ${email}:`, err.message);
+    });
+  });
 
   return { message: "OTP sent to your email" };
 };
@@ -128,6 +136,57 @@ export const register = async (input: RegisterInput): Promise<AuthResult> => {
 // ── Login ──────────────────────────────────────────────────
 export const login = async (input: LoginInput): Promise<AuthResult> => {
   const { email, password } = input;
+  const emailKey = email.toLowerCase();
+  const lockoutKey = `lockout:${emailKey}`;
+  const attemptsKey = `login_attempts:${emailKey}`;
+
+  // Check if account is currently locked out
+  if (getRedisStatus()) {
+    try {
+      const isLocked = await redisClient.get(lockoutKey);
+      if (isLocked) {
+        throw new ApiError(429, 'Account is temporarily locked due to consecutive failed login attempts. Please try again in 15 minutes.');
+      }
+    } catch (err: any) {
+      if (err instanceof ApiError) throw err;
+    }
+  } else {
+    const lockExpiry = memoryLockouts.get(emailKey);
+    if (lockExpiry && lockExpiry > Date.now()) {
+      throw new ApiError(429, 'Account is temporarily locked due to consecutive failed login attempts. Please try again in 15 minutes.');
+    }
+  }
+
+  const recordFailedAttempt = async () => {
+    if (getRedisStatus()) {
+      try {
+        const attempts = await redisClient.incr(attemptsKey);
+        if (attempts === 1) {
+          await redisClient.expire(attemptsKey, 900);
+        }
+        if (attempts >= 5) {
+          await redisClient.setEx(lockoutKey, 900, 'locked');
+          await redisClient.del(attemptsKey);
+          throw new ApiError(429, 'Account is temporarily locked due to consecutive failed login attempts. Please try again in 15 minutes.');
+        }
+      } catch (err: any) {
+        if (err instanceof ApiError) throw err;
+      }
+    } else {
+      const record = memoryAttempts.get(emailKey) || { count: 0, expiresAt: Date.now() + 900000 };
+      if (record.expiresAt < Date.now()) {
+        record.count = 0;
+        record.expiresAt = Date.now() + 900000;
+      }
+      record.count += 1;
+      memoryAttempts.set(emailKey, record);
+      if (record.count >= 5) {
+        memoryLockouts.set(emailKey, Date.now() + 900000);
+        memoryAttempts.delete(emailKey);
+        throw new ApiError(429, 'Account is temporarily locked due to consecutive failed login attempts. Please try again in 15 minutes.');
+      }
+    }
+  };
 
   const result = await query(
     `SELECT u.id, u.name, u.email, u.role, u.password_hash, u.is_active, u.device_id,
@@ -135,10 +194,11 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
      FROM users u
      LEFT JOIN organizations o ON o.id = u.organization_id
      WHERE u.email = $1`,
-    [email.toLowerCase()]
+    [emailKey]
   );
 
   if (result.rows.length === 0) {
+    await recordFailedAttempt();
     throw new ApiError(401, 'Invalid email or password');
   }
 
@@ -150,7 +210,21 @@ export const login = async (input: LoginInput): Promise<AuthResult> => {
 
   const isValid = await bcrypt.compare(password, user.password_hash);
   if (!isValid) {
+    await recordFailedAttempt();
     throw new ApiError(401, 'Invalid email or password');
+  }
+
+  // Clear failed attempts on successful authentication
+  if (getRedisStatus()) {
+    try {
+      await redisClient.del(attemptsKey);
+      await redisClient.del(lockoutKey);
+    } catch (err) {
+      // Ignore cleanup error
+    }
+  } else {
+    memoryAttempts.delete(emailKey);
+    memoryLockouts.delete(emailKey);
   }
 
   // Update last login
@@ -263,13 +337,13 @@ export const resetPassword = async (email: string, otp: string, newPassword: str
   return { message: "Password reset successful" };
 };
 
-// ── Refresh Token ─────────────────────────────────────────
-export const refreshAccessToken = async (refreshToken: string): Promise<string> => {
+// ── Refresh Token with Strict RTR (Refresh Token Rotation) ──
+export const refreshAccessToken = async (refreshToken: string): Promise<{ accessToken: string; newRefreshToken: string }> => {
   try {
     const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as JwtPayload;
+    const tokenHash = hashToken(refreshToken);
 
     // Check token in DB
-    const tokenHash = hashToken(refreshToken);
     const stored = await query(
       `SELECT id FROM refresh_tokens
        WHERE token_hash = $1 AND user_id = $2 AND expires_at > NOW()`,
@@ -277,10 +351,16 @@ export const refreshAccessToken = async (refreshToken: string): Promise<string> 
     );
 
     if (stored.rows.length === 0) {
-      throw new ApiError(401, 'Invalid or expired refresh token');
+      // ⚠️ REUSE ATTACK DETECTED! Invalidate all refresh tokens for this user family
+      console.warn(`[SECURITY BREACH] Reused refresh token detected for user: ${decoded.userId}. Revoking entire token family!`);
+      await query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [decoded.userId]);
+      throw new ApiError(401, 'Security alert: Refresh token reuse detected. All sessions terminated.');
     }
 
-    // Get user
+    // 1. Invalidate used token
+    await query(`DELETE FROM refresh_tokens WHERE id = $1`, [stored.rows[0].id]);
+
+    // 2. Get user
     const userResult = await query(
       `SELECT u.id, u.email, u.role, u.organization_id AS "organizationId", o.name AS "organizationName"
        FROM users u
@@ -292,7 +372,10 @@ export const refreshAccessToken = async (refreshToken: string): Promise<string> 
     if (userResult.rows.length === 0) throw new ApiError(404, 'User not found or inactive');
 
     const user = userResult.rows[0];
-    return generateAccessToken(user);
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = await generateRefreshToken(user.id);
+
+    return { accessToken: newAccessToken, newRefreshToken };
   } catch (error: any) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(401, 'Token refresh failed');
@@ -329,7 +412,8 @@ const generateAccessToken = (user: { id: string; email: string; role: UserRole; 
 };
 
 const generateRefreshToken = async (userId: string): Promise<string> => {
-  const token = jwt.sign({ userId }, env.JWT_REFRESH_SECRET, {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const token = jwt.sign({ userId, nonce }, env.JWT_REFRESH_SECRET, {
     expiresIn: env.JWT_REFRESH_EXPIRES_IN,
   } as jwt.SignOptions);
 

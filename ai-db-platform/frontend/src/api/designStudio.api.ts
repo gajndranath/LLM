@@ -22,9 +22,75 @@ export const designStudioApi = {
     return data;
   },
 
-  generateSchema: async (payload: { sessionId: string; provider?: string; model?: string }): Promise<ApiResponse<any>> => {
-    const { data } = await api.post('/design-studio/generate-schema', payload);
+  truncateMessages: async (sessionId: string, index: number): Promise<ApiResponse<null>> => {
+    const { data } = await api.delete(`/design-studio/sessions/${sessionId}/truncate-messages`, { data: { index } });
     return data;
+  },
+
+  generateSchema: async (
+    payload: { sessionId: string; provider?: string; model?: string },
+    onStatus?: (status: string) => void
+  ): Promise<any> => {
+    // We must use fetch instead of axios because axios doesn't support streaming responses easily in browsers
+    const response = await fetch(`${api.defaults.baseURL}/design-studio/generate-schema`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let errMessage = 'Blueprint generation failed';
+      try {
+        const errorData = await response.json();
+        errMessage = errorData.message || errMessage;
+      } catch (e) {
+         // ignore
+      }
+      throw new Error(errMessage);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder('utf-8');
+
+    if (!reader) throw new Error("No reader available from response");
+
+    let finalSchema = null;
+    let done = false;
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      done = readerDone;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            let data;
+            try {
+              data = JSON.parse(line.substring(6));
+            } catch (e) {
+               continue; // ignore partial/invalid JSON
+            }
+            if (data.type === 'status') {
+              if (onStatus) onStatus(data.message);
+            } else if (data.type === 'error') {
+              throw new Error(data.message);
+            } else if (data.type === 'complete') {
+              finalSchema = data.schema;
+            }
+          }
+        }
+      }
+    }
+
+    if (!finalSchema) {
+      throw new Error("Failed to receive complete blueprint");
+    }
+
+    return finalSchema;
   },
 
   deploySchema: async (payload: { sessionId: string; connectionId: string }): Promise<ApiResponse<any>> => {

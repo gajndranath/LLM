@@ -203,6 +203,228 @@ export const PlansManager = () => {
           </tbody>
         </table>
       </div>
+
+      {/* ── SUPER ADMIN PROMO COUPONS GENERATOR ── */}
+      <div className="mt-12 pt-8 border-t border-white/10">
+        <CouponManagerSection />
+      </div>
+    </div>
+  );
+};
+
+const CouponManagerSection = () => {
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [campaignName, setCampaignName] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [autoGenerateCode, setAutoGenerateCode] = useState(true);
+  const [discount, setDiscount] = useState(100);
+  const [maxUses, setMaxUses] = useState(1);
+  const [targetPlan, setTargetPlan] = useState('mega');
+  const [creating, setCreating] = useState(false);
+
+  const fetchCoupons = async () => {
+    try {
+      const { api } = await import('../api/axiosInstance');
+      const res = await api.get('/super-admin/coupons');
+      setCoupons(res.data.data);
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    fetchCoupons();
+  }, []);
+
+  const handleGenerate = async () => {
+    if (!campaignName.trim()) return toast.error('Enter campaign/coupon name');
+    if (!autoGenerateCode && !couponCode.trim()) return toast.error('Enter custom coupon code');
+    setCreating(true);
+    try {
+      const { api } = await import('../api/axiosInstance');
+      const res = await api.post('/super-admin/coupons/generate', {
+        name: campaignName.trim(),
+        code: autoGenerateCode ? '' : couponCode.trim().toUpperCase(),
+        discountPercent: Number(discount) || 100,
+        maxUses: Number(maxUses) || 1,
+        isLifetime: true,
+        targetPlan
+      });
+      toast.success(`🎟️ Coupon ${res.data.data.code} Generated Successfully!`);
+      setCampaignName('');
+      setCouponCode('');
+      fetchCoupons();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to generate coupon');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleToggleCoupon = async (id: string) => {
+    try {
+      const { api } = await import('../api/axiosInstance');
+      await api.put(`/super-admin/coupons/${id}/toggle`);
+      toast.success('Coupon status updated');
+      fetchCoupons();
+    } catch {
+      toast.error('Failed to update coupon status');
+    }
+  };
+
+  const handleDeleteCoupon = async (id: string) => {
+    if (!window.confirm('Permanently purge this coupon?')) return;
+    try {
+      const { api } = await import('../api/axiosInstance');
+      await api.delete(`/super-admin/coupons/${id}`);
+      toast.success('Coupon purged');
+      fetchCoupons();
+    } catch {
+      toast.error('Failed to delete coupon');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <span>🎟️</span> <span>Enterprise Promo & God-Mode Coupon Generator</span>
+          </h3>
+          <p className="text-xs text-slate-400 mt-1">Cryptographically secure coupon generation with campaign attribution.</p>
+        </div>
+      </div>
+
+      <div className="glass p-6 rounded-2xl border border-white/10 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-6 gap-4">
+          <div className="sm:col-span-2">
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Campaign / Coupon Name</label>
+            <input
+              type="text"
+              placeholder="e.g. VIP Founder Early Access"
+              value={campaignName}
+              onChange={e => setCampaignName(e.target.value)}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold uppercase text-slate-400">Coupon Code</label>
+              <button
+                type="button"
+                onClick={() => setAutoGenerateCode(!autoGenerateCode)}
+                className="text-[10px] text-blue-400 hover:underline"
+              >
+                {autoGenerateCode ? '✏️ Custom Code' : '⚡ System Auto-Gen'}
+              </button>
+            </div>
+            {autoGenerateCode ? (
+              <div className="w-full bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2 text-xs font-mono text-blue-300 flex items-center justify-between">
+                <span>[Auto-Generated Secure Code]</span>
+                <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300 font-bold">CRYPTO-SECURE</span>
+              </div>
+            ) : (
+              <input
+                type="text"
+                placeholder="e.g. FOUNDER2026"
+                value={couponCode}
+                onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono uppercase text-white"
+              />
+            )}
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Discount %</label>
+            <input
+              type="number"
+              value={discount}
+              onChange={e => setDiscount(Number(e.target.value))}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Max Redemptions</label>
+            <input
+              type="number"
+              value={maxUses}
+              onChange={e => setMaxUses(Number(e.target.value))}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-bold uppercase text-slate-400">Target Plan:</span>
+            <select
+              value={targetPlan}
+              onChange={e => setTargetPlan(e.target.value)}
+              className="bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white uppercase"
+            >
+              <option value="starter">Individual</option>
+              <option value="mid">Growth (Mid-Co)</option>
+              <option value="mega">Mega Enterprise</option>
+            </select>
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            disabled={creating}
+            className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-xl text-xs shadow-lg shadow-purple-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+          >
+            <span>⚡</span> <span>{creating ? 'Generating...' : 'Generate Coupon'}</span>
+          </button>
+        </div>
+      </div>
+
+      {coupons.length > 0 && (
+        <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-white/5 text-slate-400 uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="px-4 py-3">Campaign / Name</th>
+                <th className="px-4 py-3">Code</th>
+                <th className="px-4 py-3">Discount</th>
+                <th className="px-4 py-3">Redemptions</th>
+                <th className="px-4 py-3">Target Plan</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5 font-mono">
+              {coupons.map(c => (
+                <tr key={c.id} className={`hover:bg-white/5 ${!c.is_active ? 'opacity-60' : ''}`}>
+                  <td className="px-4 py-3 font-sans font-bold text-white max-w-[160px] truncate">{c.name || 'Standard Promo'}</td>
+                  <td className="px-4 py-3 font-bold text-cyan-300 font-mono tracking-wider">{c.code}</td>
+                  <td className="px-4 py-3 text-emerald-400">{c.discount_percent}% OFF</td>
+                  <td className="px-4 py-3 text-slate-300">{c.current_uses} / {c.max_uses}</td>
+                  <td className="px-4 py-3 uppercase text-purple-400">{c.target_plan}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${!c.is_active ? 'bg-slate-500/20 text-slate-400' : c.current_uses >= c.max_uses ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                      {!c.is_active ? 'DISABLED' : c.current_uses >= c.max_uses ? 'EXPIRED' : 'ACTIVE'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right space-x-2">
+                    <button
+                      onClick={() => handleToggleCoupon(c.id)}
+                      className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${c.is_active ? 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
+                    >
+                      {c.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCoupon(c.id)}
+                      className="text-[10px] font-bold px-2 py-1 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      Purge
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };

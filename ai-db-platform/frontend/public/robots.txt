@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /
+Allow: /features
+Allow: /docs
+Allow: /privacy
+Allow: /terms
+
+# Disallow authenticated application areas & admin panels from search engine indexing
+Disallow: /dashboard
+Disallow: /query
+Disallow: /architect
+Disallow: /schema-drift
+Disallow: /connections
+Disallow: /team
+Disallow: /billing
+Disallow: /settings
+Disallow: /super-admin
+Disallow: /api/
+
+# Sitemap Location
+Sitemap: https://atlas-ai.firetech.io/sitemap.xml

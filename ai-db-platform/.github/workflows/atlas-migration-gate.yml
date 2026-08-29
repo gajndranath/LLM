@@ -1,0 +1,42 @@
+name: Schemio Migration Safety Gate
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/**'
+      - '**/*.sql'
+
+jobs:
+  audit-migrations:
+    name: 🛡️ Audit SQL Migrations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1 pinned commit SHA
+
+      - name: Read Changed SQL Files
+        id: get_sql
+        run: |
+          SQL_CONTENT=$(find . -name "*.sql" -exec cat {} +)
+          echo "sql_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$SQL_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Run ATLAS CI Migration Safety Scan
+        id: atlas_scan
+        run: |
+          RESPONSE=$(curl -s -X POST "${{ secrets.ATLAS_API_URL }}/api/ci/audit-migration" \
+            -H "Content-Type: application/json" \
+            -d "{\"sqlContent\": $(jq -Rs . <<< "${{ steps.get_sql.outputs.sql_content }}"), \"repository\": \"${{ github.repository }}\", \"pullRequest\": \"#${{ github.event.pull_request.number }}\"}")
+          
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          PASSED=$(echo $RESPONSE | jq -r '.data.passed')
+          SCORE=$(echo $RESPONSE | jq -r '.data.score')
+          
+          if [ "$PASSED" != "true" ]; then
+            echo "❌ ATLAS Migration Safety Gate Failed (Score: $SCORE / 100)"
+            exit 1
+          else
+            echo "✅ ATLAS Migration Safety Gate Passed (Score: $SCORE / 100)"
+          fi

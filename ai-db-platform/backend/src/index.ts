@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import crypto from 'crypto';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -47,12 +48,27 @@ export const io = new SocketIOServer(httpServer, {
 
 // ── Standard Middleware ──────────────────────────────────────
 app.use(helmet());
+app.use(compression({
+  threshold: 1024, // Only compress responses that are larger than 1KB
+  level: 6         // Optimal balance between CPU usage and compression ratio
+}));
 
 // Request ID & Logging Middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = (req.headers['x-request-id'] as string) || crypto.randomUUID();
   (req as any).id = requestId;
   res.setHeader('X-Request-Id', requestId);
+
+  // CDN & Proxy Cache Protection: Never cache authenticated private API endpoints
+  if (req.url.startsWith('/api') && req.url !== '/api/health') {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+
+  if (req.url === '/api/health') {
+    return next();
+  }
 
   const startTime = Date.now();
   console.log(`📡 [${requestId}] ${req.method} ${req.url} - Request received`);
@@ -141,8 +157,16 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-// ── API Health Endpoint ──────────────────────────────────────
+// ── API Health Endpoint with 2-second In-Memory Cache (Prevents DB Pool Starvation) ──
+let lastHealthCheckTime = 0;
+let cachedHealthResult: any = null;
+
 app.get('/api/health', async (req: Request, res: Response) => {
+  const now = Date.now();
+  if (cachedHealthResult && (now - lastHealthCheckTime < 2000)) {
+    return res.status(cachedHealthResult.status === 'ok' ? 200 : 503).json(cachedHealthResult);
+  }
+
   let postgresStatus = 'unknown';
   let redisStatus = 'unknown';
 
@@ -166,7 +190,7 @@ app.get('/api/health', async (req: Request, res: Response) => {
 
   const overallStatus = (postgresStatus === 'connected' && (redisStatus === 'connected' || redisStatus === 'disconnected')) ? 'ok' : 'degraded';
 
-  return res.status(overallStatus === 'ok' ? 200 : 503).json({
+  cachedHealthResult = {
     status: overallStatus,
     timestamp: new Date().toISOString(),
     service: 'ai-db-platform-backend',
@@ -175,7 +199,10 @@ app.get('/api/health', async (req: Request, res: Response) => {
       postgres: postgresStatus,
       redis: redisStatus
     }
-  });
+  };
+  lastHealthCheckTime = now;
+
+  return res.status(overallStatus === 'ok' ? 200 : 503).json(cachedHealthResult);
 });
 
 // ── Maintenance Mode Middleware ────────────────────────────────
@@ -219,9 +246,13 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
 
 // ── Application Routes ───────────────────────────────────────
 import billingRoutes from './routes/billing.routes';
+import ciRoutes from './routes/ci.routes';
+import shopifyRoutes from './routes/shopify.routes';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/ci', ciRoutes);
+app.use('/api/shopify', shopifyRoutes);
 app.use('/api/connections', connectionRoutes);
 app.use('/api/connections', tableInspectorRoutes);
 app.use('/api/query', queryRoutes);
@@ -241,6 +272,38 @@ app.use(errorHandler);
 
 // ── System Initialization ────────────────────────────────────
 import { startCleanupScheduler } from './services/cleanup.service';
+import bcrypt from 'bcryptjs';
+
+const ensureMasterSuperAdmin = async () => {
+  const adminEmail = env.SUPER_ADMIN_EMAIL.toLowerCase().trim();
+  if (!adminEmail) return;
+
+  try {
+    const existing = await dbQuery('SELECT id, email, role FROM users WHERE email = $1', [adminEmail]);
+    
+    if (existing.rows.length === 0) {
+      const salt = await bcrypt.genSalt(12);
+      const hash = await bcrypt.hash(env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@2026!', salt);
+      
+      await dbQuery(
+        `INSERT INTO users (name, email, password_hash, role, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, 'SUPER_ADMIN', true, NOW(), NOW())`,
+        [env.SUPER_ADMIN_NAME, adminEmail, hash]
+      );
+      console.log(`👑 [SECURITY_BOOTSTRAP] Immutable Master SuperAdmin initialized: ${adminEmail}`);
+    } else {
+      // Ensure role is strictly locked to SUPER_ADMIN
+      if (existing.rows[0].role !== 'SUPER_ADMIN') {
+        await dbQuery("UPDATE users SET role = 'SUPER_ADMIN' WHERE email = $1", [adminEmail]);
+      }
+    }
+
+    // Clean up any old dummy test super admins (e.g. gajendra@example.com)
+    await dbQuery("DELETE FROM users WHERE email = 'gajendra@example.com'");
+  } catch (err: any) {
+    console.warn('⚠️ Super Admin bootstrap check note:', err.message);
+  }
+};
 
 const bootstrap = async () => {
   try {
@@ -262,7 +325,10 @@ const bootstrap = async () => {
     // 4. Initialize Socket.io Event Listeners
     initializeSocket(io);
 
-    // 5. Listen for requests
+    // 5. Ensure Master Super Admin Lock & Immutability
+    await ensureMasterSuperAdmin();
+
+    // 6. Listen for requests
     httpServer.listen(env.PORT, () => {
       console.log(`\n🚀 Backend Live: http://localhost:${env.PORT}`);
       console.log(`🌍 Environment: ${env.NODE_ENV}\n`);

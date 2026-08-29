@@ -1,0 +1,24 @@
+# Root AI DB Platform Gitignore
+node_modules/
+dist/
+dist-ssr/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment & Private Keys
+.env
+.env.*
+*.env
+*.local
+
+# Logs & Temporary Media/Cache
+logs/
+*.log
+scratch/
+.tempmediaStorage/
+.system_generated/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -31,4 +31,14 @@ export const connectionsApi = {
     const { data } = await api.put(`/connections/${id}`, payload);
     return data;
   },
+
+  getDriftReport: async (id: string): Promise<ApiResponse<any>> => {
+    const { data } = await api.get(`/connections/${id}/drift-report`);
+    return data;
+  },
+
+  importDdl: async (payload: { name: string; ddlText: string }): Promise<ApiResponse<DbConnection>> => {
+    const { data } = await api.post('/connections/import-ddl', payload);
+    return data;
+  },
 };

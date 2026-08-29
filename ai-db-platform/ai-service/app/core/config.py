@@ -4,7 +4,7 @@ from pydantic import model_validator
 
 class Settings(BaseSettings):
     # LLM Provider
-    LLM_PROVIDER: Literal["groq", "gemini", "openai", "ollama", "mistral"] = "groq"
+    LLM_PROVIDER: Literal["groq", "gemini", "openai", "ollama", "mistral", "openrouter"] = "groq"
     LLM_MODEL: str = "llama-3.1-70b-versatile"
     
     # API Keys
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     MISTRAL_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
     
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"

@@ -32,6 +32,14 @@ export const authApi = {
     const { data } = await api.post('/auth/logout');
     return data;
   },
+  forgotPassword: async (email: string) => {
+    const { data } = await api.post('/auth/forgot-password', { email });
+    return data;
+  },
+  resetPassword: async (payload: { email: string; otp: string; newPassword: string }) => {
+    const { data } = await api.post('/auth/reset-password', payload);
+    return data;
+  },
 };
 
 export const adminApi = {

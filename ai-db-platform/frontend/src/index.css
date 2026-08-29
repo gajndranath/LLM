@@ -60,9 +60,47 @@
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+/* ── Custom Sleek Select & Option Dropdowns (Unified Platform Theme) ── */
+select {
+  background-color: #0b1120 !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 0.75rem !important;
+  padding: 0.5rem 1rem !important;
+  outline: none !important;
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+}
+
+select:focus {
+  border-color: rgba(59, 130, 246, 0.6) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+}
+
+select option {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+  padding: 0.75rem 1rem !important;
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+  background-color: #1e293b !important;
+  color: #38bdf8 !important;
+}
+
+/* In-Page Enterprise Modal Overlay Animations */
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -76,4 +114,45 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ── Universal Dark-Theme Form Input & Autofill Perfection ── */
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  background-color: rgba(11, 17, 32, 0.75) !important;
+  color: #f8fafc !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  background-color: rgba(11, 17, 32, 0.95) !important;
+  border-color: rgba(59, 130, 246, 0.5) !important;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #f8fafc !important;
+  -webkit-box-shadow: 0 0 0px 1000px #0b1120 inset !important;
+  box-shadow: 0 0 0px 1000px #0b1120 inset !important;
+  caret-color: #f8fafc !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  transition: background-color 5000s ease-in-out 0s !important;
 }
