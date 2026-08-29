@@ -109,7 +109,7 @@ const Login = () => {
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-all">
             <Database className="w-5 h-5 text-white" />
           </div>
-          <span className="text-xl font-bold tracking-tight text-white">Atlas AI</span>
+          <span className="text-xl font-bold tracking-tight text-white">Schemio</span>
         </Link>
 
         <Link to="/" className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1.5 bg-white/5 px-4 py-2 rounded-xl border border-white/5 backdrop-blur-md hover:bg-white/10 transition-all">
@@ -252,7 +252,7 @@ const Login = () => {
 
       {/* ── Footer ── */}
       <footer className="relative z-20 border-t border-white/5 py-6 px-6 text-center text-xs text-slate-600 bg-black/40 backdrop-blur-md">
-        © {new Date().getFullYear()} Atlas AI Intelligence Platform. All rights reserved.
+        © {new Date().getFullYear()} Schemio Platform. All rights reserved.
       </footer>
 
       {/* ── FORGOT PASSWORD / OTP MODAL ── */}
