@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Editor from '@monaco-editor/react';
 import { connectionsApi } from '../api/connections.api';
@@ -44,7 +44,17 @@ const QueryPage = () => {
   const [pageSize, setPageSize] = useState(10);
   const [tableSearch, setTableSearch] = useState('');
 
-  const [showSchema, setShowSchema] = useState(true);
+  // Responsive mobile active view: 'editor' | 'schema' | 'results'
+  const [mobileTab, setMobileTab] = useState<'editor' | 'schema' | 'results'>('editor');
+  const [showSchema, setShowSchema] = useState(() => window.innerWidth >= 1024);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1024) setShowSchema(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [activeBottomTab, setActiveBottomTab] = useState<'results' | 'chart' | 'diagrams'>('results');
   const [diagramTab, setDiagramTab] = useState<'erd' | 'dfd' | 'flow'>('erd');
   const [isEditorExpanded, setIsEditorExpanded] = useState(false);
@@ -69,7 +79,7 @@ const QueryPage = () => {
   const { data: schema, isLoading: schemaLoading } = useSchemaExtract(selectedConn);
 
   // Fetch History
-  const { data: history } = useQuery({
+  useQuery({
     queryKey: ['history', selectedConn],
     queryFn: async () => {
       const res = await queryApi.getHistory(selectedConn || undefined);
@@ -164,58 +174,65 @@ const QueryPage = () => {
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden bg-[#090C13] text-slate-100">
       
-      {/* ── 1. UNIFIED TOP BAR ── */}
-      <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0B0E18]/80 backdrop-blur-md">
-        {/* Left: Schema toggle + Brand Badge */}
-        <div className="flex items-center gap-2.5 flex-shrink-0">
+      {/* ── 1. COMPACT TOP WORKSPACE TOOLBAR ── */}
+      <header className="px-3 md:px-4 py-2 border-b border-white/5 bg-[#0B0E18]/90 backdrop-blur-md flex items-center justify-between gap-2 flex-shrink-0 z-10 pl-14 md:pl-4">
+        {/* Left: Studio Branding & Schema Toggle */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => setShowSchema(v => !v)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+            className="hidden md:flex p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all"
             title={showSchema ? "Collapse Schema Explorer" : "Expand Schema Explorer"}
           >
             {showSchema ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
           </button>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-bold text-white tracking-wide">SQL Copilot Studio</span>
-            <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+            <span className="text-xs font-bold text-white tracking-wide truncate max-w-[110px] sm:max-w-none">SQL Copilot</span>
+            <span className="hidden sm:inline text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
               AI Powered
             </span>
           </div>
         </div>
 
-        {/* Center: Quick Query History Prompt Pills */}
-        {history && history.length > 0 && (
-          <div className="hidden lg:flex items-center gap-1.5 overflow-hidden max-w-md">
-            <span className="text-[10px] uppercase font-mono text-slate-500 font-bold flex-shrink-0">Recent:</span>
-            {history.slice(0, 2).map((h: any, idx: number) => (
-              <button
-                key={idx}
-                onClick={() => setGeneratedSql(h.query_text)}
-                className="text-[11px] text-slate-400 hover:text-blue-300 bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-md truncate max-w-[180px] transition-all border border-white/5"
-                title={h.query_text}
-              >
-                {h.query_text}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Mobile View Switcher Tabs */}
+        <div className="flex md:hidden items-center bg-white/5 p-0.5 rounded-xl border border-white/10">
+          <button
+            onClick={() => setMobileTab('editor')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${mobileTab === 'editor' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+          >
+            Studio
+          </button>
+          <button
+            onClick={() => setMobileTab('schema')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${mobileTab === 'schema' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+          >
+            Schema ({filteredTables.length})
+          </button>
+          {results && (
+            <button
+              onClick={() => setMobileTab('results')}
+              className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${mobileTab === 'results' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+            >
+              Data Grid
+            </button>
+          )}
+        </div>
 
         {/* Right: Data Source Selector */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="flex items-center gap-1.5 bg-white/5 border border-white/8 rounded-xl px-2.5 py-1">
+          <div className="flex items-center gap-1.5 bg-white/5 border border-white/8 rounded-xl px-2 py-1">
             <Database size={12} className="text-blue-400 flex-shrink-0" />
             <select
-              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-white cursor-pointer max-w-[160px]"
+              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-white cursor-pointer max-w-[110px] sm:max-w-[160px] truncate"
               value={selectedConn || ''}
               onChange={(e) => setSelectedConn(e.target.value)}
             >
               <option value="" className="bg-slate-900 text-slate-400">
-                {isLoading ? 'Loading...' : 'Select Connection'}
+                {isLoading ? 'Loading...' : 'Select DB'}
               </option>
               {Array.isArray(connections) && connections.map((conn: any) => (
                 <option key={conn.id} value={conn.id} className="bg-slate-900 text-white">
-                  {conn.name} ({conn.database_name})
+                  {conn.name}
                 </option>
               ))}
             </select>
@@ -224,11 +241,13 @@ const QueryPage = () => {
       </header>
 
       {/* ── 2. MAIN 2-PANEL WORKSPACE ── */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden relative">
 
-        {/* ── LEFT PANEL: Schema & Entity Explorer ── */}
-        {showSchema && (
-          <aside className="w-64 flex-shrink-0 flex flex-col border-r border-white/5 bg-[#0B0E18]/60 overflow-hidden">
+        {/* ── LEFT PANEL: Schema & Entity Explorer (Responsive Drawer on Mobile) ── */}
+        {(showSchema || mobileTab === 'schema') && (
+          <aside className={`flex-shrink-0 flex flex-col border-r border-white/5 bg-[#0B0E18]/95 overflow-hidden z-20
+            ${mobileTab === 'schema' ? 'w-full flex-1 md:w-64 md:flex-initial' : 'w-64'}
+          `}>
             {/* Header & Instant Search Filter */}
             <div className="p-2.5 border-b border-white/5 space-y-2 bg-white/2">
               <div className="flex items-center justify-between">
@@ -314,7 +333,9 @@ const QueryPage = () => {
         )}
 
         {/* ── RIGHT CANVAS: Pro-Studio Vertical Workspace ── */}
-        <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-[#0A0D14]">
+        <div className={`flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden bg-[#0A0D14]
+          ${mobileTab === 'schema' ? 'hidden md:flex' : 'flex'}
+        `}>
 
           {/* 1. Hero Natural Language Prompt Section */}
           <div className="p-3 border-b border-white/5 bg-[#0B0E18]/60 flex-shrink-0">

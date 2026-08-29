@@ -395,9 +395,9 @@ export default function ArchitectStudio() {
       <div className="flex-1 h-full min-h-0 flex flex-col overflow-hidden">
 
         {/* ── TOP BAR ── */}
-        <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0B0E18]/80 backdrop-blur-md">
+        <header className="flex-shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 md:px-4 py-2 border-b border-white/5 bg-[#0B0E18]/90 backdrop-blur-md pl-14 md:pl-4">
           {/* Left: Brand + Section Indicator */}
-          <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => setShowSessions(v => !v)}
               className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all"
@@ -407,8 +407,8 @@ export default function ArchitectStudio() {
             </button>
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <span className="text-xs font-bold text-white tracking-wide">ATLAS Studio</span>
-              <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
+              <span className="text-xs font-bold text-white tracking-wide truncate max-w-[110px] sm:max-w-none">Schemio Studio</span>
+              <span className="hidden sm:inline text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
                 {mode === 'new' ? 'Architect' : 'Auditor'}
               </span>
             </div>
@@ -420,14 +420,14 @@ export default function ArchitectStudio() {
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                   view === v 
                     ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' 
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
                 }`}
               >
                 {v === 'chat' ? <MessageSquare size={12} /> : v === 'history' ? <History size={12} /> : <Database size={12} />}
-                <span>{v === 'changelog' ? 'Time Machine' : v.charAt(0).toUpperCase() + v.slice(1)}</span>
+                <span>{v === 'changelog' ? 'Changelog' : v.charAt(0).toUpperCase() + v.slice(1)}</span>
               </button>
             ))}
           </div>
