@@ -98,12 +98,12 @@ const LandingPage = () => {
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 leading-[1.1]">
             One Bad Migration Costs $300k/hr. <br className="hidden md:block" />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
-              Atlas Prevents It Before You Merge.
+              Schemio Prevents It Before You Merge.
             </span>
           </h1>
           
           <p className="text-lg md:text-xl text-slate-400 mb-12 max-w-3xl mx-auto leading-relaxed">
-            Atlas AI acts as your 24/7 Principal Database Architect. By combining <strong className="text-white">Multi-Agent DAG Consensus</strong>, <strong className="text-white">Silicon AST Syntax Gatekeepers</strong>, and <strong className="text-white">Live Out-of-Band Schema Drift Detection</strong>, Atlas guarantees mathematically normalized 3NF blueprints with zero data loss.
+            Schemio acts as your 24/7 Principal Database Architect. By combining <strong className="text-white">Multi-Agent DAG Consensus</strong>, <strong className="text-white">Silicon AST Syntax Gatekeepers</strong>, and <strong className="text-white">Live Out-of-Band Schema Drift Detection</strong>, Schemio guarantees mathematically normalized 3NF blueprints with zero data loss.
           </p>
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
@@ -219,7 +219,7 @@ const LandingPage = () => {
             <span className="text-xs font-bold uppercase tracking-widest text-blue-400">Deterministic Multi-Agent Consensus</span>
             <h2 className="text-3xl md:text-5xl font-extrabold text-white mt-2 mb-4">Meet Your 4-Agent AI Engineering Board</h2>
             <p className="text-slate-400 text-base max-w-3xl mx-auto">
-              Instead of unconstrained LLM loops that burn tokens, Atlas coordinates four specialized agents structured in a deterministic Directed Acyclic Graph (DAG):
+              Instead of unconstrained LLM loops that burn tokens, Schemio coordinates four specialized agents structured in a deterministic Directed Acyclic Graph (DAG):
             </p>
           </div>
 
@@ -278,7 +278,7 @@ const LandingPage = () => {
           </div>
         </section>
 
-        {/* ── 4. Who Uses Atlas AI? (Personas & Market Segments) ── */}
+        {/* ── 4. Who Uses Schemio? (Personas & Market Segments) ── */}
         <section id="personas" className="py-24 px-6 max-w-7xl mx-auto border-t border-white/5">
           <div className="text-center mb-16">
             <span className="text-xs font-bold uppercase tracking-widest text-emerald-400">Tailored Intelligence</span>
@@ -332,7 +332,7 @@ const LandingPage = () => {
                 "We Never Store or Touch Your Production Data"
               </h2>
               <p className="text-slate-300 text-sm leading-relaxed max-w-3xl">
-                Atlas AI connects strictly in <strong className="text-white">READ-ONLY Transaction Sandboxes</strong> (`SET TRANSACTION READ ONLY`). We extract table schema metadata, foreign key constraints, and column statistics—never your customers' private records or raw data.
+                Schemio connects strictly in <strong className="text-white">READ-ONLY Transaction Sandboxes</strong> (`SET TRANSACTION READ ONLY`). We extract table schema metadata, foreign key constraints, and column statistics—never your customers' private records or raw data.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-white/10">
@@ -360,7 +360,7 @@ const LandingPage = () => {
               <span className="text-xs font-bold uppercase tracking-widest text-blue-400">Transparent Enterprise ROI</span>
               <h2 className="text-4xl md:text-5xl font-extrabold text-white mt-2 mb-4">Invest in Autonomous Reliability</h2>
               <p className="text-slate-400 text-base max-w-2xl mx-auto">
-                Hiring a full-time Senior DBA costs $180,000/year. Atlas delivers 24/7 infallible reliability at a fraction of the cost.
+                Hiring a full-time Senior DBA costs $180,000/year. Schemio delivers 24/7 infallible reliability at a fraction of the cost.
               </p>
             </div>
             
@@ -429,10 +429,10 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <Link to="/" className="flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-500" />
-            <span className="text-xl font-bold tracking-tight text-white">Atlas AI</span>
+            <span className="text-xl font-bold tracking-tight text-white">Schemio</span>
           </Link>
           <div className="text-xs text-slate-500 font-medium">
-            © {new Date().getFullYear()} Atlas AI Intelligence Platform. All rights reserved.
+            © {new Date().getFullYear()} Schemio Platform. All rights reserved.
           </div>
           <div className="flex gap-6 text-xs font-semibold text-slate-400">
             <Link to="/docs" className="hover:text-white transition-colors">Documentation</Link>
