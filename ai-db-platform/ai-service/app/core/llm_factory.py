@@ -18,12 +18,12 @@ class LLMFactory:
         # Build automatic fallbacks for rate limits
         fallbacks = []
         if primary_provider == "openrouter":
-            # If using OpenRouter, fall back strictly to other OpenRouter models to prevent key mix-ups
+            # If using OpenRouter, fall back to reliable OpenRouter models
             openrouter_fallbacks = [
                 "google/gemini-2.5-flash",
-                "meta-llama/llama-3.3-70b-instruct",
                 "google/gemini-2.5-pro",
-                "mistralai/mistral-7b-instruct:free"
+                "nvidia/nemotron-3.5-lightning:free",
+                "cohere/north-mini-code:free"
             ]
             for fb_model in openrouter_fallbacks:
                 if fb_model != primary_model and settings.OPENROUTER_API_KEY:
@@ -117,4 +117,5 @@ class LLMFactory:
             api_key=settings.OPENROUTER_API_KEY,
             base_url="https://openrouter.ai/api/v1",
             temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS or 4096,
         )
